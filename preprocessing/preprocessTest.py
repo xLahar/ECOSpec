@@ -9,7 +9,7 @@ from sklearn.preprocessing import MinMaxScaler
 # Load spectrum (two columns only)
 # Left = WAVE, Right = INTENSITY
 ########################################
-df = pd.read_csv("one_spectrum.csv", header=None, names=["WAVE", "INTENSITY"])
+df = pd.read_csv("Styro10sTest.csv", header=None, names=["INTENSITY", "WAVE"])
 
 # Remove negatives and round
 df = df[df["INTENSITY"] > 0]
