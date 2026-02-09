@@ -2,16 +2,15 @@ import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 from scipy.signal import medfilt
-from scipy.stats import pearsonr
 from numpy.polynomial import Polynomial
 from sklearn.preprocessing import MinMaxScaler
+from scipy.stats import pearsonr
 
 ########################################
 # Load spectrum (two columns only)
 # Left = WAVE, Right = INTENSITY
 ########################################
 df = pd.read_csv("Styro10sTest.csv", header=None, names=["INTENSITY", "WAVE"])
-
 
 # Remove negatives and round
 df = df[df["INTENSITY"] > 0]
@@ -54,7 +53,9 @@ df_proc["INTENSITY_SNV"] = snv
 # Min-Max scaling (0–1)
 ########################################
 scaler = MinMaxScaler()
-df_proc["INTENSITY_NORM"] = scaler.fit_transform(df_proc["INTENSITY_SNV"].values.reshape(-1, 1))
+df_proc["INTENSITY_NORM"] = scaler.fit_transform(
+    df_proc["INTENSITY_SNV"].values.reshape(-1, 1)
+)
 
 ########################################
 # Quick visualization
@@ -72,6 +73,50 @@ plt.title("Preprocessing Raman Spectrum (Python)")
 plt.show()
 
 ########################################
-# Save processed spectrum
+# Save processed unknown spectrum
 ########################################
 df_proc.to_csv("processed_one_spectrum.csv", index=False)
+
+########################################
+# Load PRE-PROCESSED LIBRARY
+########################################
+# Format:
+# Row 0: material names in WAVE columns
+# Col pairs: [WAVE, INTENSITY_NORM]
+########################################
+library_df = pd.read_csv("processed_library.csv", header=None)
+
+unknown_intensity = df_proc["INTENSITY_NORM"].values
+
+best_match = None
+best_r = -np.inf
+scores = {}
+
+########################################
+# Pearson correlation matching
+########################################
+for col in range(0, library_df.shape[1], 2):
+    material_name = library_df.iloc[0, col]
+
+    lib_intensity = library_df.iloc[1:, col + 1].astype(float).values
+
+    if len(lib_intensity) != len(unknown_intensity):
+        raise ValueError(f"Length mismatch for {material_name}")
+
+    r, _ = pearsonr(unknown_intensity, lib_intensity)
+    scores[material_name] = r
+
+    if r > best_r:
+        best_r = r
+        best_match = material_name
+
+########################################
+# Results
+########################################
+print("\n=== Spectral Match Results ===")
+print(f"Best match: {best_match}")
+print(f"Pearson r: {best_r:.4f}")
+
+print("\nTop 5 matches:")
+for name, r in sorted(scores.items(), key=lambda x: x[1], reverse=True)[:5]:
+    print(f"{name:25s}  r = {r:.4f}")
