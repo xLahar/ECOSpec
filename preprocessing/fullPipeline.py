@@ -1,3 +1,8 @@
+## TODO:
+# - Add command-line argument parsing for input file (see preprocessTest.py)
+# - Process raw test specrra and add to library
+# - test matching with Pearson correlation
+
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
