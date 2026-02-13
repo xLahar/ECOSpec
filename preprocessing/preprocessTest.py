@@ -1,17 +1,37 @@
+import sys
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 from scipy.signal import medfilt
-from scipy.stats import pearsonr
 from numpy.polynomial import Polynomial
 from sklearn.preprocessing import MinMaxScaler
+from pathlib import Path
+
+########################################
+# Base directories
+########################################
+RAW_DIR = Path("spectra/raw")
+PROCESSED_DIR = Path("spectra/processed")
+
+########################################
+# Check command-line argument
+########################################
+if len(sys.argv) != 2:
+    print("Usage: python preprocess.py <filename_in_spectra_raw>")
+    sys.exit(1)
+
+fileName = sys.argv[1]
+input_file = RAW_DIR / fileName
+
+if not input_file.exists():
+    print(f"Error: File not found -> {input_file}")
+    sys.exit(1)
 
 ########################################
 # Load spectrum (two columns only)
 # Left = WAVE, Right = INTENSITY
 ########################################
-df = pd.read_csv("Styro10sTest.csv", header=None, names=["INTENSITY", "WAVE"])
-
+df = pd.read_csv(input_file, header=None, names=["INTENSITY", "WAVE"])
 
 # Remove negatives and round
 df = df[df["INTENSITY"] > 0]
@@ -27,18 +47,15 @@ df = df[(df["WAVE"] >= 200) & (df["WAVE"] <= 3400)]
 wave_grid = np.arange(200, 3401, 1)
 interp_intensity = np.interp(wave_grid, df["WAVE"], df["INTENSITY"])
 
-df_proc = pd.DataFrame({
-    "WAVE": wave_grid,
-    "INTENSITY_RAW": interp_intensity
-})
+df_proc = pd.DataFrame({"WAVE": wave_grid, "INTENSITY_RAW": interp_intensity})
 
 ########################################
-# Median filter (remove spikes)
+# Median filter
 ########################################
 df_proc["INTENSITY_MED"] = medfilt(df_proc["INTENSITY_RAW"], kernel_size=15)
 
 ########################################
-# Polynomial baseline correction (7th order)
+# Polynomial baseline correction
 ########################################
 p = Polynomial.fit(df_proc["WAVE"], df_proc["INTENSITY_MED"], deg=7)
 baseline = p(df_proc["WAVE"])
@@ -47,17 +64,22 @@ df_proc["INTENSITY_CORR"] = df_proc["INTENSITY_MED"] - baseline
 ########################################
 # SNV normalization
 ########################################
-snv = (df_proc["INTENSITY_CORR"] - df_proc["INTENSITY_CORR"].mean()) / df_proc["INTENSITY_CORR"].std()
+snv = (
+    df_proc["INTENSITY_CORR"] - df_proc["INTENSITY_CORR"].mean()
+) / df_proc["INTENSITY_CORR"].std()
+
 df_proc["INTENSITY_SNV"] = snv
 
 ########################################
 # Min-Max scaling (0–1)
 ########################################
 scaler = MinMaxScaler()
-df_proc["INTENSITY_NORM"] = scaler.fit_transform(df_proc["INTENSITY_SNV"].values.reshape(-1, 1))
+df_proc["INTENSITY_NORM"] = scaler.fit_transform(
+    df_proc["INTENSITY_SNV"].values.reshape(-1, 1)
+)
 
 ########################################
-# Quick visualization
+# Visualization
 ########################################
 plt.figure(figsize=(10, 5))
 plt.plot(df["WAVE"], df["INTENSITY"], label="Raw", alpha=0.5)
@@ -68,10 +90,16 @@ plt.plot(df_proc["WAVE"], df_proc["INTENSITY_NORM"], label="Final normalized", c
 plt.legend()
 plt.xlabel("Wavenumber (cm$^{-1}$)")
 plt.ylabel("Intensity")
-plt.title("Preprocessing Raman Spectrum (Python)")
+plt.title(f"Preprocessing Raman Spectrum\n{input_file.name}")
 plt.show()
 
 ########################################
-# Save processed spectrum
+# Create processed folder + save output
 ########################################
-df_proc.to_csv("processed_one_spectrum.csv", index=False)
+processed_dir = Path("spectra/processed")
+processed_dir.mkdir(exist_ok=True)
+
+output_path = processed_dir / f"{input_file.stem}_processed.csv"
+df_proc.to_csv(output_path, index=False)
+
+print(f"\nProcessed file saved to: {output_path}")
