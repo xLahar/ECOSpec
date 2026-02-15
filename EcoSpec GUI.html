@@ -96,13 +96,6 @@
     <label>Averages <span class="val" id="avg-val">5</span></label>
     <input type="range" min="1" max="20" value="5" oninput="document.getElementById('avg-val').textContent=this.value">
 
-    <label>Polynomial Order</label>
-    <select>
-      <option>5th order</option>
-      <option selected>7th order</option>
-      <option>9th order</option>
-    </select>
-
     <div style="display:flex; gap:8px;">
       <button class="btn btn-primary" id="start-btn" onclick="startScan()" style="flex:1;">▶ Start Scan</button>
       <button class="btn btn-stop" onclick="eStop()">■ Stop</button>
@@ -307,7 +300,7 @@ function exportData() {
   document.getElementById('s-laser').className = 'warn';
   log('Emergency stop — laser disabled', 'err');
   idleLoop();
-}
+
 </script>
 </body>
 </html>
