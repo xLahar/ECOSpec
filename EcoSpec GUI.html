@@ -1,0 +1,287 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>ECOSpec</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body { font-family: Arial, sans-serif; background: #f5f5f5; padding: 20px; color: #222; }
+
+  h1 { font-size: 22px; margin-bottom: 4px; }
+  .subtitle { color: #666; font-size: 13px; margin-bottom: 20px; }
+
+  .row { display: flex; gap: 16px; margin-bottom: 16px; flex-wrap: wrap; }
+
+  .card {
+    background: white;
+    border: 1px solid #ccc;
+    border-radius: 6px;
+    padding: 14px;
+    flex: 1;
+    min-width: 200px;
+  }
+  .card h2 { font-size: 13px; color: #555; margin-bottom: 12px; text-transform: uppercase; letter-spacing: 0.5px; border-bottom: 1px solid #eee; padding-bottom: 8px; }
+
+  /* Spectrum */
+  #specCanvas { width: 100%; height: 160px; background: #fafafa; border: 1px solid #ddd; border-radius: 4px; display: block; margin-bottom: 4px; }
+  .x-labels { display: flex; justify-content: space-between; font-size: 10px; color: #999; margin-bottom: 0; }
+
+  /* Controls */
+  label { font-size: 12px; color: #444; display: block; margin-bottom: 2px; }
+  .val { float: right; font-weight: bold; color: #2563eb; }
+  input[type=range] { width: 100%; margin-bottom: 12px; }
+  select { width: 100%; padding: 5px; font-size: 12px; border: 1px solid #ccc; border-radius: 3px; margin-bottom: 14px; }
+
+  .btn { padding: 9px 16px; font-size: 13px; border-radius: 4px; border: none; cursor: pointer; font-weight: bold; }
+  .btn-primary { background: #2563eb; color: white; }
+  .btn-primary:hover { background: #1d4ed8; }
+  .btn-primary:disabled { background: #93b4f5; cursor: not-allowed; }
+  .btn-stop { background: #dc2626; color: white; }
+  .btn-stop:hover { background: #b91c1c; }
+
+  .progress-wrap { margin-top: 10px; display: none; }
+  .progress-wrap.show { display: block; }
+  .progress-label { font-size: 11px; color: #555; margin-bottom: 4px; }
+  .progress-bar { height: 8px; background: #e5e7eb; border-radius: 4px; overflow: hidden; }
+  .progress-fill { height: 100%; background: #2563eb; border-radius: 4px; width: 0%; transition: width 0.2s; }
+
+  /* Result */
+  .result-name { font-size: 20px; font-weight: bold; color: #16a34a; }
+  .result-score { font-size: 12px; color: #555; margin: 4px 0 10px; }
+  .bar-outer { height: 8px; background: #e5e7eb; border-radius: 4px; overflow: hidden; margin-bottom: 12px; }
+  .bar-inner { height: 100%; background: #16a34a; border-radius: 4px; transition: width 0.6s; }
+  .match-row { display: flex; justify-content: space-between; font-size: 12px; padding: 5px 0; border-bottom: 1px solid #f0f0f0; }
+  .match-row:last-child { border-bottom: none; }
+  .no-result { color: #aaa; font-size: 12px; }
+
+  /* Status */
+  .stat-row { display: flex; justify-content: space-between; font-size: 12px; padding: 5px 0; border-bottom: 1px solid #f0f0f0; }
+  .stat-row:last-child { border-bottom: none; }
+  .ok { color: #16a34a; font-weight: bold; }
+  .warn { color: #d97706; font-weight: bold; }
+  .off { color: #888; }
+
+  /* Log */
+  .log { background: #fafafa; border: 1px solid #ddd; border-radius: 4px; font-size: 11px; font-family: monospace; padding: 8px; height: 110px; overflow-y: auto; }
+  .log div { margin-bottom: 2px; }
+  .log .t { color: #999; margin-right: 6px; }
+  .log .ok { color: #16a34a; font-weight: normal; }
+  .log .err { color: #dc2626; font-weight: normal; }
+  .log .info { color: #2563eb; font-weight: normal; }
+</style>
+</head>
+<body>
+
+<h1>ECOSpec</h1>
+<p class="subtitle">Raman Spectroscopy — Microplastic Identification System</p>
+
+<!-- Row 1: Spectrum + Controls -->
+<div class="row">
+  <div class="card" style="flex:2; min-width:300px;">
+    <h2>Live Raman Spectrum</h2>
+    <canvas id="specCanvas"></canvas>
+    <div class="x-labels">
+      <span>500</span><span>700</span><span>900</span><span>1100</span>
+      <span>1300</span><span>1500</span><span>1700</span><span>1900 cm⁻¹</span>
+    </div>
+  </div>
+
+  <div class="card" style="min-width:200px; max-width:240px;">
+    <h2>Settings</h2>
+
+    <label>Integration Time <span class="val" id="integ-val">250 ms</span></label>
+    <input type="range" min="10" max="1000" value="250" oninput="document.getElementById('integ-val').textContent=this.value+' ms'">
+
+    <label>Averages <span class="val" id="avg-val">5</span></label>
+    <input type="range" min="1" max="20" value="5" oninput="document.getElementById('avg-val').textContent=this.value">
+
+    <label>Polynomial Order</label>
+    <select>
+      <option>5th order</option>
+      <option selected>7th order</option>
+      <option>9th order</option>
+    </select>
+
+    <div style="display:flex; gap:8px;">
+      <button class="btn btn-primary" id="start-btn" onclick="startScan()" style="flex:1;">▶ Start Scan</button>
+      <button class="btn btn-stop" onclick="eStop()">■ E-STOP</button>
+    </div>
+
+    <div class="progress-wrap" id="prog-wrap">
+      <div class="progress-label" id="prog-label">Acquiring...</div>
+      <div class="progress-bar"><div class="progress-fill" id="prog-fill"></div></div>
+    </div>
+  </div>
+</div>
+
+<!-- Row 2: Result + Status + Log -->
+<div class="row">
+  <div class="card" style="flex:1; min-width:200px;">
+    <h2>Identification Result</h2>
+    <div id="result-area"><p class="no-result">Run a scan to see results.</p></div>
+  </div>
+
+  <div class="card" style="flex:1; min-width:180px;">
+    <h2>System Status</h2>
+    <div class="stat-row"><span>Raspberry Pi 5</span><span class="ok">ONLINE</span></div>
+    <div class="stat-row"><span>ESP32 MCU</span><span class="ok">ONLINE</span></div>
+    <div class="stat-row"><span>ACUROS CQD Camera</span><span class="ok">LINKED</span></div>
+    <div class="stat-row"><span>785 nm Laser</span><span id="s-laser" class="off">STANDBY</span></div>
+    <div class="stat-row"><span>TEC Detector (−15°C)</span><span class="ok">OK</span></div>
+    <div class="stat-row"><span>Interlocks</span><span class="ok">ALL CLEAR</span></div>
+  </div>
+
+  <div class="card" style="flex:1.5; min-width:220px;">
+    <h2>System Log</h2>
+    <div class="log" id="log"></div>
+  </div>
+</div>
+
+<script>
+// ── Helpers ───────────────────────────────────────────
+function ts() {
+  return new Date().toTimeString().slice(0,8);
+}
+function log(msg, cls='') {
+  const el = document.getElementById('log');
+  el.innerHTML += `<div><span class="t">[${ts()}]</span><span class="${cls}">${msg}</span></div>`;
+  el.scrollTop = el.scrollHeight;
+}
+
+log('System initialized', 'ok');
+log('ACUROS CQD camera linked via eBUS SDK', 'ok');
+log('ESP32 UART connected (115200 bps)', 'ok');
+log('All interlocks nominal', 'ok');
+log('Ready for acquisition');
+
+// Canvas 
+const canvas = document.getElementById('specCanvas');
+const ctx = canvas.getContext('2d');
+let animId, scanInterval, scanning = false, currentSpec = null;
+
+function resize() {
+  canvas.width = canvas.offsetWidth;
+  canvas.height = canvas.offsetHeight;
+  draw(currentSpec);
+}
+
+function noise() {
+  return Array.from({length:300}, () => 0.02 + Math.random()*0.04);
+}
+
+function peSpectrum() {
+  const peaks = [{p:85,h:0.88,w:6},{p:120,h:0.70,w:5},{p:220,h:0.50,w:8},{p:265,h:1.0,w:5},{p:285,h:0.82,w:4}];
+  return Array.from({length:300}, (_,i) => {
+    let v = (Math.random()-0.5)*0.01 + 0.03;
+    peaks.forEach(pk => v += pk.h * Math.exp(-0.5*((i-pk.p)/pk.w)**2));
+    return Math.max(0, v);
+  });
+}
+
+function norm(arr) {
+  const mn = Math.min(...arr), mx = Math.max(...arr);
+  return arr.map(v => (v-mn)/(mx-mn));
+}
+
+function draw(data) {
+  const W = canvas.width, H = canvas.height;
+  ctx.clearRect(0,0,W,H);
+  // grid lines
+  ctx.strokeStyle = '#eee'; ctx.lineWidth = 1;
+  [1,2,3,4].forEach(i => { ctx.beginPath(); ctx.moveTo(0,H*i/5); ctx.lineTo(W,H*i/5); ctx.stroke(); });
+  [1,2,3,4,5,6].forEach(i => { ctx.beginPath(); ctx.moveTo(W*i/7,0); ctx.lineTo(W*i/7,H); ctx.stroke(); });
+
+  if (!data) {
+    ctx.fillStyle = '#bbb'; ctx.font = '12px Arial'; ctx.textAlign = 'center';
+    ctx.fillText('Awaiting acquisition...', W/2, H/2);
+    return;
+  }
+  const n = norm(data);
+  // fill
+  const grad = ctx.createLinearGradient(0,0,0,H);
+  grad.addColorStop(0,'rgba(37,99,235,0.18)'); grad.addColorStop(1,'rgba(37,99,235,0)');
+  ctx.beginPath();
+  n.forEach((v,i) => { const x=i/(n.length-1)*W, y=(1-v)*(H-10)+5; i?ctx.lineTo(x,y):ctx.moveTo(x,y); });
+  ctx.lineTo(W,H); ctx.lineTo(0,H); ctx.closePath();
+  ctx.fillStyle = grad; ctx.fill();
+  // line
+  ctx.beginPath();
+  n.forEach((v,i) => { const x=i/(n.length-1)*W, y=(1-v)*(H-10)+5; i?ctx.lineTo(x,y):ctx.moveTo(x,y); });
+  ctx.strokeStyle = '#2563eb'; ctx.lineWidth = 1.5; ctx.stroke();
+}
+
+function idleLoop() { draw(noise()); animId = requestAnimationFrame(idleLoop); }
+window.addEventListener('resize', resize);
+resize();
+idleLoop();
+
+// Scan
+function startScan() {
+  if (scanning) return;
+  scanning = true;
+  cancelAnimationFrame(animId);
+
+  document.getElementById('start-btn').disabled = true;
+  document.getElementById('start-btn').textContent = '⏳ Scanning...';
+  document.getElementById('prog-wrap').classList.add('show');
+  document.getElementById('s-laser').textContent = 'ACTIVE';
+  document.getElementById('s-laser').className = 'ok';
+
+  log('Scan started', 'info');
+  log('Laser enabled — 785 nm, 150 mW', 'info');
+
+  const raw = noise(), target = peSpectrum();
+  let pct = 0;
+  const steps = [[0,'Acquiring raw frames...'],[20,'Noise filter (median)...'],[40,'Fluorescence removal (7th-order polynomial)...'],[60,'SNV normalization...'],[80,'Min-max scaling...'],[92,'Pearson similarity matching...']];
+  const logged = new Set();
+
+  scanInterval = setInterval(() => {
+    pct = Math.min(100, pct + 1.4);
+    document.getElementById('prog-fill').style.width = pct + '%';
+    steps.forEach(([th, msg]) => {
+      if (pct >= th && !logged.has(th)) { logged.add(th); log(msg); document.getElementById('prog-label').textContent = msg; }
+    });
+    const b = Math.min(1, pct/100*1.3);
+    currentSpec = raw.map((v,i) => v*(1-b)+target[i]*b);
+    draw(currentSpec);
+    if (pct >= 100) { clearInterval(scanInterval); finishScan(); }
+  }, 50);
+}
+
+function finishScan() {
+  scanning = false;
+  currentSpec = peSpectrum();
+  draw(currentSpec);
+  document.getElementById('start-btn').disabled = false;
+  document.getElementById('start-btn').textContent = '▶ Start Scan';
+  document.getElementById('prog-wrap').classList.remove('show');
+  document.getElementById('s-laser').textContent = 'STANDBY';
+  document.getElementById('s-laser').className = 'off';
+  log('Result: Polyethylene (PE) — 93.6%', 'ok');
+
+  document.getElementById('result-area').innerHTML = `
+    <div class="result-name">Polyethylene (PE)</div>
+    <div class="result-score">Pearson Similarity: 93.6%</div>
+    <div class="bar-outer"><div class="bar-inner" style="width:93.6%"></div></div>
+    <div class="match-row"><span>#1 — Polyethylene (PE)</span><span style="color:#16a34a;font-weight:bold">93.6%</span></div>
+    <div class="match-row"><span>#2 — Polypropylene (PP)</span><span style="color:#888">71.2%</span></div>
+    <div class="match-row"><span>#3 — Polystyrene (PS)</span><span style="color:#aaa">44.8%</span></div>
+    <div class="match-row"><span>#4 — PET</span><span style="color:#ccc">31.5%</span></div>
+  `;
+}
+
+function eStop() {
+  clearInterval(scanInterval); cancelAnimationFrame(animId);
+  scanning = false; currentSpec = null;
+  document.getElementById('start-btn').disabled = false;
+  document.getElementById('start-btn').textContent = '▶ Start Scan';
+  document.getElementById('prog-wrap').classList.remove('show');
+  document.getElementById('s-laser').textContent = 'OFF';
+  document.getElementById('s-laser').className = 'warn';
+  log('Emergency stop — laser disabled', 'err');
+  idleLoop();
+}
+</script>
+</body>
+</html>
