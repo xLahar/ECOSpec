@@ -105,7 +105,7 @@
 
     <div style="display:flex; gap:8px;">
       <button class="btn btn-primary" id="start-btn" onclick="startScan()" style="flex:1;">▶ Start Scan</button>
-      <button class="btn btn-stop" onclick="eStop()">■ E-STOP</button>
+      <button class="btn btn-stop" onclick="eStop()">■ Stop</button>
     </div>
 
     <div class="progress-wrap" id="prog-wrap">
@@ -120,6 +120,7 @@
   <div class="card" style="flex:1; min-width:200px;">
     <h2>Identification Result</h2>
     <div id="result-area"><p class="no-result">Run a scan to see results.</p></div>
+    <button class="btn btn-primary" id="export-btn" onclick="exportData()" style="margin-top:12px; width:100%; display:none;">⬇ Export Data (CSV)</button>
   </div>
 
   <div class="card" style="flex:1; min-width:180px;">
@@ -155,7 +156,7 @@ log('ESP32 UART connected (115200 bps)', 'ok');
 log('All interlocks nominal', 'ok');
 log('Ready for acquisition');
 
-// Canvas 
+// ── Canvas ────────────────────────────────────────────
 const canvas = document.getElementById('specCanvas');
 const ctx = canvas.getContext('2d');
 let animId, scanInterval, scanning = false, currentSpec = null;
@@ -216,7 +217,7 @@ window.addEventListener('resize', resize);
 resize();
 idleLoop();
 
-// Scan
+// ── Scan ──────────────────────────────────────────────
 function startScan() {
   if (scanning) return;
   scanning = true;
@@ -259,6 +260,7 @@ function finishScan() {
   document.getElementById('s-laser').textContent = 'STANDBY';
   document.getElementById('s-laser').className = 'off';
   log('Result: Polyethylene (PE) — 93.6%', 'ok');
+  document.getElementById('export-btn').style.display = 'block';
 
   document.getElementById('result-area').innerHTML = `
     <div class="result-name">Polyethylene (PE)</div>
@@ -271,7 +273,31 @@ function finishScan() {
   `;
 }
 
-function eStop() {
+function exportData() {
+  if (!currentSpec) return;
+  const integ = document.getElementById('integ-val').textContent;
+  const avgs  = document.getElementById('avg-val').textContent;
+  const timestamp = new Date().toISOString();
+
+  let csv = `# ECOSpec Export\n# Timestamp: ${timestamp}\n# Integration Time: ${integ}\n# Averages: ${avgs}\n# Result: Polyethylene (PE) — 93.6%\n#\n`;
+  csv += 'Index,Raman Shift (cm-1),Intensity (normalized)\n';
+
+  const n = norm(currentSpec);
+  n.forEach((v, i) => {
+    const shift = Math.round(500 + (i / (n.length - 1)) * 1400);
+    csv += `${i},${shift},${v.toFixed(5)}\n`;
+  });
+
+  const blob = new Blob([csv], { type: 'text/csv' });
+  const url  = URL.createObjectURL(blob);
+  const a    = document.createElement('a');
+  a.href     = url;
+  a.download = `ecospec_${timestamp.slice(0,19).replace(/[:T]/g,'-')}.csv`;
+  a.click();
+  URL.revokeObjectURL(url);
+  log('Data exported to CSV', 'ok');
+}
+
   clearInterval(scanInterval); cancelAnimationFrame(animId);
   scanning = false; currentSpec = null;
   document.getElementById('start-btn').disabled = false;
