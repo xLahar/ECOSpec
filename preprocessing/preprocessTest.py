@@ -38,8 +38,8 @@ df = df[df["INTENSITY"] > 0]
 
 df = df.sort_values("WAVE")
 
-#df["INTENSITY"] = df["INTENSITY"].round()
-#df["WAVE"] = df["WAVE"].round()
+df["INTENSITY"] = df["INTENSITY"].round()
+df["WAVE"] = df["WAVE"].round()
 
 # Restrict to 200–3400 cm-1
 df = df[(df["WAVE"] >= 200) & (df["WAVE"] <= 3400)]
@@ -80,18 +80,16 @@ df_proc["INTENSITY_SNV"] = snv
 # Min-Max scaling (0–1)
 ########################################
 scaler = MinMaxScaler()
-df_proc["INTENSITY_NORM"] = scaler.fit_transform(
-    df_proc["INTENSITY_SNV"].values.reshape(-1, 1)
-)
+df_proc["INTENSITY_NORM"] = scaler.fit_transform(df_proc["INTENSITY_SNV"].values.reshape(-1, 1))
 
 ########################################
 # Visualization
 ########################################
 plt.figure(figsize=(10, 5))
-#plt.plot(df["WAVE"], df["INTENSITY"], label="Raw", alpha=0.5)
-#plt.plot(df_proc["WAVE"], df_proc["INTENSITY_MED"], label="Median filter", alpha=0.8)
-#plt.plot(df_proc["WAVE"], baseline, label="7th poly baseline", color="red")
-#plt.plot(df_proc["WAVE"], df_proc["INTENSITY_CORR"], label="Corrected", color="black")
+plt.plot(df["WAVE"], df["INTENSITY"], label="Raw", alpha=0.5)
+plt.plot(df_proc["WAVE"], df_proc["INTENSITY_MED"], label="Median filter", alpha=0.8)
+plt.plot(df_proc["WAVE"], baseline, label="7th poly baseline", color="red")
+plt.plot(df_proc["WAVE"], df_proc["INTENSITY_CORR"], label="Corrected", color="black")
 plt.plot(df_proc["WAVE"], df_proc["INTENSITY_NORM"], label="Final normalized", color="green")
 plt.legend()
 plt.xlabel("Wavenumber (cm$^{-1}$)")
