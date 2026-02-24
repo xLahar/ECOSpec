@@ -1,8 +1,4 @@
-## TODO:
-# - Add command-line argument parsing for input file (see preprocessTest.py)
-# - Process raw test specrra and add to library
-# - test matching with Pearson correlation
-
+import sys
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
@@ -10,12 +6,26 @@ from scipy.signal import medfilt
 from numpy.polynomial import Polynomial
 from sklearn.preprocessing import MinMaxScaler
 from scipy.stats import pearsonr
+from pathlib import Path
+
+########################################
+# Base directories
+########################################
+RAW_DIR = Path("spectra/raw")
+PROCESSED_DIR = Path("spectra/processed")
+
+########################################
+# Check command-line argument
+########################################
+if len(sys.argv) != 2:
+    print("Usage: python fullPipeline.py <filename_in_spectra_raw>")
+    sys.exit(1)
 
 ########################################
 # Load spectrum (two columns only)
 # Left = WAVE, Right = INTENSITY
 ########################################
-df = pd.read_csv("Styro10sTest.csv", header=None, names=["INTENSITY", "WAVE"])
+df = pd.read_csv(sys.argv[1], header=None, names=["INTENSITY", "WAVE"])
 
 # Remove negatives and round
 df = df[df["INTENSITY"] > 0]
@@ -80,7 +90,7 @@ plt.show()
 ########################################
 # Save processed unknown spectrum
 ########################################
-df_proc.to_csv("processed_one_spectrum.csv", index=False)
+df_proc.to_csv(PROCESSED_DIR / f"processed_{sys.argv[1]}", index=False)
 
 ########################################
 # Load PRE-PROCESSED LIBRARY
@@ -89,7 +99,7 @@ df_proc.to_csv("processed_one_spectrum.csv", index=False)
 # Row 0: material names in WAVE columns
 # Col pairs: [WAVE, INTENSITY_NORM]
 ########################################
-library_df = pd.read_csv("processed_library.csv", header=None)
+library_df = pd.read_csv(PROCESSED_DIR / "processed_library.csv", header=None)
 
 unknown_intensity = df_proc["INTENSITY_NORM"].values
 
