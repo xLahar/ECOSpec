@@ -21,11 +21,19 @@ if len(sys.argv) != 2:
     print("Usage: python fullPipeline.py <filename_in_spectra_raw>")
     sys.exit(1)
 
+fileName = sys.argv[1]
+input_name = f"{fileName}_raw.csv"
+input_path = RAW_DIR / input_name
+
+if not input_path.exists():
+    print(f"Error: File not found -> {input_path}")
+    sys.exit(1)
+
 ########################################
 # Load spectrum (two columns only)
 # Left = WAVE, Right = INTENSITY
 ########################################
-df = pd.read_csv(sys.argv[1], header=None, names=["INTENSITY", "WAVE"])
+df = pd.read_csv(input_path, header=None, names=["WAVE", "INTENSITY"])
 
 # Remove negatives and round
 df = df[df["INTENSITY"] > 0]
@@ -87,10 +95,24 @@ plt.ylabel("Intensity")
 plt.title("Preprocessing Raman Spectrum (Python)")
 plt.show()
 
+
+########################################
+# Build processed output filename
+########################################
+
+# Remove extension safely
+base_name = Path(input_path).stem
+
+# Replace _raw with _processed
+base_name = base_name.replace("_raw", "_processed")
+
+output_name = f"{base_name}.csv"
+output_path = PROCESSED_DIR / output_name
+
 ########################################
 # Save processed unknown spectrum
 ########################################
-df_proc.to_csv(PROCESSED_DIR / f"processed_{sys.argv[1]}", index=False)
+df_proc.to_csv(output_path, index=False)
 
 ########################################
 # Load PRE-PROCESSED LIBRARY
@@ -99,7 +121,7 @@ df_proc.to_csv(PROCESSED_DIR / f"processed_{sys.argv[1]}", index=False)
 # Row 0: material names in WAVE columns
 # Col pairs: [WAVE, INTENSITY_NORM]
 ########################################
-library_df = pd.read_csv(PROCESSED_DIR / "processed_library.csv", header=None)
+library_df = pd.read_csv(PROCESSED_DIR / "lib.csv", header=None)
 
 unknown_intensity = df_proc["INTENSITY_NORM"].values
 
