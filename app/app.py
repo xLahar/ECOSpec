@@ -1,23 +1,20 @@
 import sys
+import serial
 from pathlib import Path
 import matplotlib.pyplot as plt
-from preprocessing.processing import process_spectrum
+from processing.processing import process_spectrum
+from hardware.espComms import send_servo_command
 
 RAW_DIR = Path("preprocessing/spectra/raw")
 
 scan_running = False  # global flag for scan status
 
-def list_raw_spectra():
+def list_raw_spectra(): #debugging
     """Return a list of CSV files in the raw spectra folder."""
     raw_files = [f.name for f in RAW_DIR.glob("*.csv")]
     return raw_files
 
-def start_scan():
-    global scan_running
-    if scan_running:
-        print("Scan already running!")
-        return
-
+def process_spectrum_cli():
     raw_files = list_raw_spectra()
     if not raw_files:
         print(f"No raw spectra found in {RAW_DIR}")
@@ -61,7 +58,30 @@ def start_scan():
     plt.title(f"Processed Spectrum: {file_to_process}")
     plt.show()
 
-    scan_running = False
+def servo_test():
+    print("Running servo test...")
+    # Initialize serial connection
+    try:
+        ser = serial.Serial("/dev/ttyS0", 115200, timeout=2)
+        print("Serial connection established on /dev/ttyS0 at 115200 baud")
+    except serial.SerialException as e:
+        print(f"Error opening serial port: {e}")
+        exit(1)
+    
+    #run test command
+    send_servo_command(ser)
+
+    #close serial connection
+    ser.close()
+    print("Serial connection closed")
+
+def start_scan():
+    global scan_running
+    if scan_running:
+        print("Scan already running!")
+        return
+    print("Starting scan...")
+    scan_running = True
 
 def stop_scan():
     global scan_running
@@ -79,20 +99,40 @@ def exit_app():
     print("Exiting ECOSpec CLI.")
     sys.exit(0)
 
+def debug_mode():
+    print("\n=== Debug Mode ===")
+    print("Options:")
+    print("1. Processing test")
+    print("2. Servo Test")
+    print("3. Camera Test")
+    debugMode = input("Select a debug option [1-3]: ").strip()
+    if debugMode == "1":
+        print("Running processing test...")
+        process_spectrum_cli()
+    elif debugMode == "2":
+        print("Running servo test...")
+        # Here you can call a test function for servo
+    elif debugMode == "3":
+        print("Running camera test...")
+        # Here you can call a test function for camera
+
 def main():
     while True:
         print("\n=== ECOSpec CLI ===")
         print("Options:")
         print("1. Start scan")
         print("2. Stop scan")
-        print("3. Exit")
-        choice = input("Select an option [1-3]: ").strip()
+        print("3. Debug Mode")
+        print("4. Exit")
+        choice = input("Select an option [1-4]: ").strip()
 
         if choice == "1":
             start_scan()
         elif choice == "2":
             stop_scan()
         elif choice == "3":
+            debug_mode()
+        elif choice == "4":
             exit_app()
         else:
             print("Invalid option, try again.")
