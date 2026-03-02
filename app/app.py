@@ -4,10 +4,12 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 from processing.processing import process_spectrum
 from hardware.espComms import send_servo_command
+from hardware.cameraControl import Camera
 
 RAW_DIR = Path("preprocessing/spectra/raw")
 
 scan_running = False  # global flag for scan status
+cam = None  # global camera instance for debug mode
 
 def list_raw_spectra(): #debugging
     """Return a list of CSV files in the raw spectra folder."""
@@ -111,10 +113,20 @@ def debug_mode():
         process_spectrum_cli()
     elif debugMode == "2":
         print("Running servo test...")
-        # Here you can call a test function for servo
+        servo_test()
     elif debugMode == "3":
         print("Running camera test...")
-        # Here you can call a test function for camera
+        global cam
+        cam = Camera()
+        print("Camera object made, initializing...")
+        cam.init()
+        print("Camera initialized, reading info...")
+        cam.read_image_info()
+        print("Fetching test image...")
+        cam.get_test_image()
+        print("Closing camera...")
+        cam.close()
+        print("Camera closed successfully.")
 
 def main():
     while True:
