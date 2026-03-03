@@ -1,6 +1,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "freertos/queue.h"
+#include "freertos/semphr.h"
 #include "driver/uart.h"
 #include "driver/ledc.h"
 #include "driver/i2s.h"
@@ -16,14 +17,20 @@ static const char *TAG = "main";
 #define UART_BUF 256
 
 /* ================= SERVO ================= */
-#define SERVO_PIN   17
+#define SERVO_PIN   18
 #define MIN_DUTY    410
 #define MAX_DUTY    2048
+#define MID_DUTY    ((MIN_DUTY + MAX_DUTY) / 2)
 
 /* ================= WAV / I2S ================= */
 #define I2S_NUM       I2S_NUM_0
 #define WAV_FILE_PATH "/spiffs/audio.wav"
 #define READ_BUF_SIZE 4096
+
+/* ================= RTOS ================= */
+static QueueHandle_t     servo_queue;
+static QueueHandle_t     audio_queue;
+static SemaphoreHandle_t uart_mutex;
 
 /* ================= UART HELPER ================= */
 static void uart_print(const char *msg) {
@@ -31,11 +38,6 @@ static void uart_print(const char *msg) {
     uart_write_bytes(UART_NUM, msg, strlen(msg));
     xSemaphoreGive(uart_mutex);
 }
-
-/* ================= RTOS ================= */
-static QueueHandle_t     servo_queue;
-static QueueHandle_t     audio_queue;
-static SemaphoreHandle_t uart_mutex;
 
 /* ================= WAV HEADER ================= */
 typedef struct __attribute__((packed)) {
@@ -60,7 +62,7 @@ static void spiffs_init(void) {
         .base_path              = "/spiffs",
         .partition_label        = NULL,
         .max_files              = 5,
-        .format_if_mount_failed = false,
+        .format_if_mount_failed = true,
     };
     ESP_ERROR_CHECK(esp_vfs_spiffs_register(&conf));
     ESP_LOGI(TAG, "SPIFFS mounted");
@@ -68,6 +70,9 @@ static void spiffs_init(void) {
 
 /* ================= SERVO INIT ================= */
 static void servo_init(void) {
+    gpio_set_direction(SERVO_PIN, GPIO_MODE_OUTPUT);
+    gpio_set_level(SERVO_PIN, 0);
+    vTaskDelay(pdMS_TO_TICKS(500));
     ledc_timer_config_t timer = {
         .speed_mode      = LEDC_LOW_SPEED_MODE,
         .timer_num       = LEDC_TIMER_0,
@@ -82,7 +87,7 @@ static void servo_init(void) {
         .channel    = LEDC_CHANNEL_0,
         .timer_sel  = LEDC_TIMER_0,
         .gpio_num   = SERVO_PIN,
-        .duty       = MIN_DUTY,
+        .duty       = MID_DUTY,
         .hpoint     = 0
     };
     ledc_channel_config(&channel);
@@ -97,7 +102,6 @@ static void servo_task(void *arg) {
 
     while (1) {
         if (xQueueReceive(servo_queue, &cmd, portMAX_DELAY)) {
-
             if (zero) {
                 uart_print("Servo moving to max\r\n");
                 while (duty < MAX_DUTY) {
@@ -119,7 +123,6 @@ static void servo_task(void *arg) {
                 }
                 zero = true;
             }
-
             uart_print("Servo done\r\n");
         }
     }
@@ -144,7 +147,6 @@ static void audio_task(void *arg) {
                 continue;
             }
 
-            // Init I2S with WAV's sample rate
             i2s_config_t i2s_cfg = {
                 .mode                 = I2S_MODE_MASTER | I2S_MODE_TX | I2S_MODE_DAC_BUILT_IN,
                 .sample_rate          = hdr.sample_rate,
@@ -195,7 +197,6 @@ static void uart_rx_task(void *arg) {
     int idx = 0;
 
     while (1) {
-        // Block here until the UART ISR signals data has arrived
         if (xQueueReceive(uart_event_queue, &event, portMAX_DELAY)) {
             if (event.type != UART_DATA) continue;
 
@@ -236,8 +237,15 @@ static void uart_rx_task(void *arg) {
 
 /* ================= MAIN ================= */
 void app_main(void) {
+    // Create RTOS objects first
+    servo_queue = xQueueCreate(1, sizeof(bool));
+    audio_queue = xQueueCreate(1, sizeof(bool));
+    uart_mutex  = xSemaphoreCreateMutex();
+    ESP_LOGI(TAG, "queues ok");
+
+    // UART init
     uart_config_t cfg = {
-        .baud_rate  = 115200,
+        .baud_rate  = 9600,
         .data_bits  = UART_DATA_8_BITS,
         .parity     = UART_PARITY_DISABLE,
         .stop_bits  = UART_STOP_BITS_1,
@@ -247,15 +255,20 @@ void app_main(void) {
     uart_param_config(UART_NUM, &cfg);
     uart_set_pin(UART_NUM, UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE,
                  UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE);
+    ESP_LOGI(TAG, "uart ok");
 
     spiffs_init();
-    servo_init();
+    ESP_LOGI(TAG, "spiffs ok");
 
-    servo_queue = xQueueCreate(1, sizeof(bool));
-    audio_queue = xQueueCreate(1, sizeof(bool));
-    uart_mutex  = xSemaphoreCreateMutex();
+    servo_init();
+    ESP_LOGI(TAG, "servo ok");
 
     xTaskCreate(uart_rx_task, "uart_rx", 4096,  NULL, 10, NULL);
     xTaskCreate(servo_task,   "servo",   4096,  NULL,  9, NULL);
-    xTaskCreatePinnedToCore(audio_task, "audio", 8192, NULL, 8, NULL, 1); // pinned to core 1
+    xTaskCreatePinnedToCore(audio_task, "audio", 8192, NULL, 8, NULL, 1);
+    ESP_LOGI(TAG, "tasks ok");
+
+    while(1) {
+        vTaskDelay(pdMS_TO_TICKS(1000));
+    }
 }
