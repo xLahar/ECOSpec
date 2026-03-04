@@ -163,11 +163,12 @@ static void audio_task(void *arg) {
                 .tx_desc_auto_clear   = true,
             };
             i2s_driver_install(I2S_NUM, &i2s_cfg, 0, NULL);
-            char info[64];
-snprintf(info, sizeof(info), "SR:%lu CH:%u BIT:%u\r\n",
-         hdr.sample_rate, hdr.num_channels, hdr.bits_per_sample);
-uart_print(info);
             i2s_set_dac_mode(I2S_DAC_CHANNEL_RIGHT_EN);
+
+            i2s_set_clk(I2S_NUM,
+            hdr.sample_rate,
+            I2S_BITS_PER_SAMPLE_16BIT,
+            I2S_CHANNEL_MONO);
 
             uart_print("Playing audio\r\n");
 
