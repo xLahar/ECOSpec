@@ -20,7 +20,6 @@ static const char *TAG = "main";
 #define SERVO_PIN   18
 #define MIN_DUTY    410
 #define MAX_DUTY    2048
-#define MID_DUTY    ((MIN_DUTY + MAX_DUTY) / 2)
 
 /* ================= WAV / I2S ================= */
 #define I2S_NUM       I2S_NUM_0
@@ -66,13 +65,17 @@ static void spiffs_init(void) {
     };
     ESP_ERROR_CHECK(esp_vfs_spiffs_register(&conf));
     ESP_LOGI(TAG, "SPIFFS mounted");
+    FILE *f = fopen("/spiffs/audio.wav", "rb");
+if (f) {
+    ESP_LOGI(TAG, "audio.wav found");
+    fclose(f);
+} else {
+    ESP_LOGI(TAG, "audio.wav NOT found");
+}
 }
 
 /* ================= SERVO INIT ================= */
 static void servo_init(void) {
-    gpio_set_direction(SERVO_PIN, GPIO_MODE_OUTPUT);
-    gpio_set_level(SERVO_PIN, 0);
-    vTaskDelay(pdMS_TO_TICKS(500));
     ledc_timer_config_t timer = {
         .speed_mode      = LEDC_LOW_SPEED_MODE,
         .timer_num       = LEDC_TIMER_0,
@@ -87,7 +90,7 @@ static void servo_init(void) {
         .channel    = LEDC_CHANNEL_0,
         .timer_sel  = LEDC_TIMER_0,
         .gpio_num   = SERVO_PIN,
-        .duty       = MID_DUTY,
+        .duty       = MIN_DUTY,
         .hpoint     = 0
     };
     ledc_channel_config(&channel);
@@ -151,14 +154,19 @@ static void audio_task(void *arg) {
                 .mode                 = I2S_MODE_MASTER | I2S_MODE_TX | I2S_MODE_DAC_BUILT_IN,
                 .sample_rate          = hdr.sample_rate,
                 .bits_per_sample      = I2S_BITS_PER_SAMPLE_16BIT,
-                .channel_format       = I2S_CHANNEL_FMT_RIGHT_LEFT,
-                .communication_format = I2S_COMM_FORMAT_STAND_MSB,
+                .channel_format       = I2S_CHANNEL_FMT_ONLY_RIGHT,
+                .communication_format = I2S_COMM_FORMAT_I2S_MSB,
                 .intr_alloc_flags     = ESP_INTR_FLAG_LEVEL1,
                 .dma_buf_count        = 8,
-                .dma_buf_len          = 512,
+                .dma_buf_len          = 1024,
+                .use_apll             = false,
                 .tx_desc_auto_clear   = true,
             };
             i2s_driver_install(I2S_NUM, &i2s_cfg, 0, NULL);
+            char info[64];
+snprintf(info, sizeof(info), "SR:%lu CH:%u BIT:%u\r\n",
+         hdr.sample_rate, hdr.num_channels, hdr.bits_per_sample);
+uart_print(info);
             i2s_set_dac_mode(I2S_DAC_CHANNEL_RIGHT_EN);
 
             uart_print("Playing audio\r\n");
@@ -171,11 +179,18 @@ static void audio_task(void *arg) {
                 int n = fread(buf, 1, sizeof(buf), f);
                 if (n <= 0) break;
 
-                if (hdr.bits_per_sample == 8) {
+                if (hdr.bits_per_sample == 16) {
+                    int samples = n / 2;
+                    int16_t *s16 = (int16_t *)buf;
+                    for (int i = 0; i < samples; i++) {
+                        // Convert signed 16-bit to unsigned 8-bit for DAC
+                        buf16[i] = (uint16_t)((s16[i] + 32768) >> 8) << 8;
+                    }
+                    i2s_write(I2S_NUM, buf16, samples * 2, &written, portMAX_DELAY);
+                } else {
+                    // 8-bit unsigned, shift up for DAC
                     for (int i = 0; i < n; i++) buf16[i] = (uint16_t)buf[i] << 8;
                     i2s_write(I2S_NUM, buf16, n * 2, &written, portMAX_DELAY);
-                } else {
-                    i2s_write(I2S_NUM, buf, n, &written, portMAX_DELAY);
                 }
             }
 
@@ -245,7 +260,7 @@ void app_main(void) {
 
     // UART init
     uart_config_t cfg = {
-        .baud_rate  = 9600,
+        .baud_rate  = 115200,
         .data_bits  = UART_DATA_8_BITS,
         .parity     = UART_PARITY_DISABLE,
         .stop_bits  = UART_STOP_BITS_1,
@@ -267,8 +282,4 @@ void app_main(void) {
     xTaskCreate(servo_task,   "servo",   4096,  NULL,  9, NULL);
     xTaskCreatePinnedToCore(audio_task, "audio", 8192, NULL, 8, NULL, 1);
     ESP_LOGI(TAG, "tasks ok");
-
-    while(1) {
-        vTaskDelay(pdMS_TO_TICKS(1000));
-    }
 }
