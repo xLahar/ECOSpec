@@ -10,7 +10,7 @@
 #include "esp_spiffs.h"
 #include <string.h>
 
-//static const char *TAG = "main";
+static const char *TAG = "main";
 
 /* ================= UART ================= */
 #define UART_NUM UART_NUM_0
