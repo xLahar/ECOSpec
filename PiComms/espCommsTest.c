@@ -10,7 +10,7 @@
 #include "esp_spiffs.h"
 #include <string.h>
 
-static const char *TAG = "main";
+//static const char *TAG = "main";
 
 /* ================= UART ================= */
 #define UART_NUM UART_NUM_0
@@ -22,13 +22,13 @@ static const char *TAG = "main";
 #define MAX_DUTY    2048
 
 /* ================= WAV / I2S ================= */
-#define I2S_NUM       I2S_NUM_0
-#define WAV_FILE_PATH "/spiffs/audio.wav"
-#define READ_BUF_SIZE 4096
+// #define I2S_NUM       I2S_NUM_0
+// #define WAV_FILE_PATH "/spiffs/audio.wav"
+// #define READ_BUF_SIZE 4096
 
 /* ================= RTOS ================= */
 static QueueHandle_t     servo_queue;
-static QueueHandle_t     audio_queue;
+// static QueueHandle_t     audio_queue;
 static SemaphoreHandle_t uart_mutex;
 
 /* ================= UART HELPER ================= */
@@ -38,41 +38,41 @@ static void uart_print(const char *msg) {
     xSemaphoreGive(uart_mutex);
 }
 
-/* ================= WAV HEADER ================= */
-typedef struct __attribute__((packed)) {
-    char     riff[4];
-    uint32_t file_size;
-    char     wave[4];
-    char     fmt[4];
-    uint32_t fmt_size;
-    uint16_t audio_format;
-    uint16_t num_channels;
-    uint32_t sample_rate;
-    uint32_t byte_rate;
-    uint16_t block_align;
-    uint16_t bits_per_sample;
-    char     data[4];
-    uint32_t data_size;
-} wav_header_t;
+// /* ================= WAV HEADER ================= */
+// typedef struct __attribute__((packed)) {
+//     char     riff[4];
+//     uint32_t file_size;
+//     char     wave[4];
+//     char     fmt[4];
+//     uint32_t fmt_size;
+//     uint16_t audio_format;
+//     uint16_t num_channels;
+//     uint32_t sample_rate;
+//     uint32_t byte_rate;
+//     uint16_t block_align;
+//     uint16_t bits_per_sample;
+//     char     data[4];
+//     uint32_t data_size;
+// } wav_header_t;
 
-/* ================= SPIFFS INIT ================= */
-static void spiffs_init(void) {
-    esp_vfs_spiffs_conf_t conf = {
-        .base_path              = "/spiffs",
-        .partition_label        = NULL,
-        .max_files              = 5,
-        .format_if_mount_failed = true,
-    };
-    ESP_ERROR_CHECK(esp_vfs_spiffs_register(&conf));
-    ESP_LOGI(TAG, "SPIFFS mounted");
-    FILE *f = fopen("/spiffs/audio.wav", "rb");
-if (f) {
-    ESP_LOGI(TAG, "audio.wav found");
-    fclose(f);
-} else {
-    ESP_LOGI(TAG, "audio.wav NOT found");
-}
-}
+// /* ================= SPIFFS INIT ================= */
+// static void spiffs_init(void) {
+//     esp_vfs_spiffs_conf_t conf = {
+//         .base_path              = "/spiffs",
+//         .partition_label        = NULL,
+//         .max_files              = 5,
+//         .format_if_mount_failed = true,
+//     };
+//     ESP_ERROR_CHECK(esp_vfs_spiffs_register(&conf));
+//     ESP_LOGI(TAG, "SPIFFS mounted");
+//     FILE *f = fopen("/spiffs/audio.wav", "rb");
+// if (f) {
+//     ESP_LOGI(TAG, "audio.wav found");
+//     fclose(f);
+// } else {
+//     ESP_LOGI(TAG, "audio.wav NOT found");
+// }
+// }
 
 /* ================= SERVO INIT ================= */
 static void servo_init(void) {
@@ -131,77 +131,77 @@ static void servo_task(void *arg) {
     }
 }
 
-/* ================= AUDIO TASK ================= */
-static void audio_task(void *arg) {
-    bool cmd;
+// /* ================= AUDIO TASK ================= */
+// static void audio_task(void *arg) {
+//     bool cmd;
 
-    while (1) {
-        if (xQueueReceive(audio_queue, &cmd, portMAX_DELAY)) {
+//     while (1) {
+//         if (xQueueReceive(audio_queue, &cmd, portMAX_DELAY)) {
 
-            FILE *f = fopen(WAV_FILE_PATH, "rb");
-            if (!f) { uart_print("ERR: no wav file\r\n"); continue; }
+//             FILE *f = fopen(WAV_FILE_PATH, "rb");
+//             if (!f) { uart_print("ERR: no wav file\r\n"); continue; }
 
-            wav_header_t hdr;
-            fread(&hdr, sizeof(hdr), 1, f);
+//             wav_header_t hdr;
+//             fread(&hdr, sizeof(hdr), 1, f);
 
-            if (strncmp(hdr.riff, "RIFF", 4) || strncmp(hdr.wave, "WAVE", 4) || hdr.audio_format != 1) {
-                uart_print("ERR: bad wav\r\n");
-                fclose(f);
-                continue;
-            }
+//             if (strncmp(hdr.riff, "RIFF", 4) || strncmp(hdr.wave, "WAVE", 4) || hdr.audio_format != 1) {
+//                 uart_print("ERR: bad wav\r\n");
+//                 fclose(f);
+//                 continue;
+//             }
 
-            i2s_config_t i2s_cfg = {
-                .mode                 = I2S_MODE_MASTER | I2S_MODE_TX | I2S_MODE_DAC_BUILT_IN,
-                .sample_rate          = hdr.sample_rate,
-                .bits_per_sample      = I2S_BITS_PER_SAMPLE_16BIT,
-                .channel_format       = I2S_CHANNEL_FMT_ONLY_RIGHT,
-                .communication_format = I2S_COMM_FORMAT_I2S_MSB,
-                .intr_alloc_flags     = ESP_INTR_FLAG_LEVEL1,
-                .dma_buf_count        = 8,
-                .dma_buf_len          = 1024,
-                .use_apll             = false,
-                .tx_desc_auto_clear   = true,
-            };
-            i2s_driver_install(I2S_NUM, &i2s_cfg, 0, NULL);
-            i2s_set_dac_mode(I2S_DAC_CHANNEL_RIGHT_EN);
+//             i2s_config_t i2s_cfg = {
+//                 .mode                 = I2S_MODE_MASTER | I2S_MODE_TX | I2S_MODE_DAC_BUILT_IN,
+//                 .sample_rate          = hdr.sample_rate,
+//                 .bits_per_sample      = I2S_BITS_PER_SAMPLE_16BIT,
+//                 .channel_format       = I2S_CHANNEL_FMT_ONLY_RIGHT,
+//                 .communication_format = I2S_COMM_FORMAT_I2S_MSB,
+//                 .intr_alloc_flags     = ESP_INTR_FLAG_LEVEL1,
+//                 .dma_buf_count        = 8,
+//                 .dma_buf_len          = 1024,
+//                 .use_apll             = false,
+//                 .tx_desc_auto_clear   = true,
+//             };
+//             i2s_driver_install(I2S_NUM, &i2s_cfg, 0, NULL);
+//             i2s_set_dac_mode(I2S_DAC_CHANNEL_RIGHT_EN);
 
-            i2s_set_clk(I2S_NUM,
-            hdr.sample_rate,
-            I2S_BITS_PER_SAMPLE_16BIT,
-            I2S_CHANNEL_MONO);
+//             i2s_set_clk(I2S_NUM,
+//             hdr.sample_rate,
+//             I2S_BITS_PER_SAMPLE_16BIT,
+//             I2S_CHANNEL_MONO);
 
-            uart_print("Playing audio\r\n");
+//             uart_print("Playing audio\r\n");
 
-            static uint8_t  buf[READ_BUF_SIZE];
-            static uint16_t buf16[READ_BUF_SIZE];
-            size_t written;
+//             static uint8_t  buf[READ_BUF_SIZE];
+//             static uint16_t buf16[READ_BUF_SIZE];
+//             size_t written;
 
-            while (true) {
-                int n = fread(buf, 1, sizeof(buf), f);
-                if (n <= 0) break;
+//             while (true) {
+//                 int n = fread(buf, 1, sizeof(buf), f);
+//                 if (n <= 0) break;
 
-                if (hdr.bits_per_sample == 16) {
-                    int samples = n / 2;
-                    int16_t *s16 = (int16_t *)buf;
-                    for (int i = 0; i < samples; i++) {
-                        // Convert signed 16-bit to unsigned 8-bit for DAC
-                        buf16[i] = (uint16_t)((s16[i] + 32768) >> 8) << 8;
-                    }
-                    i2s_write(I2S_NUM, buf16, samples * 2, &written, portMAX_DELAY);
-                } else {
-                    // 8-bit unsigned, shift up for DAC
-                    for (int i = 0; i < n; i++) buf16[i] = (uint16_t)buf[i] << 8;
-                    i2s_write(I2S_NUM, buf16, n * 2, &written, portMAX_DELAY);
-                }
-            }
+//                 if (hdr.bits_per_sample == 16) {
+//                     int samples = n / 2;
+//                     int16_t *s16 = (int16_t *)buf;
+//                     for (int i = 0; i < samples; i++) {
+//                         // Convert signed 16-bit to unsigned 8-bit for DAC
+//                         buf16[i] = (uint16_t)((s16[i] + 32768) >> 8) << 8;
+//                     }
+//                     i2s_write(I2S_NUM, buf16, samples * 2, &written, portMAX_DELAY);
+//                 } else {
+//                     // 8-bit unsigned, shift up for DAC
+//                     for (int i = 0; i < n; i++) buf16[i] = (uint16_t)buf[i] << 8;
+//                     i2s_write(I2S_NUM, buf16, n * 2, &written, portMAX_DELAY);
+//                 }
+//             }
 
-            fclose(f);
-            i2s_zero_dma_buffer(I2S_NUM);
-            i2s_driver_uninstall(I2S_NUM);
-            uart_print("Audio done\r\n");
-        }
-    }
-}
+//             fclose(f);
+//             i2s_zero_dma_buffer(I2S_NUM);
+//             i2s_driver_uninstall(I2S_NUM);
+//             uart_print("Audio done\r\n");
+//         }
+//     }
+// }
 
 /* ================= UART RX TASK ================= */
 static QueueHandle_t uart_event_queue;
@@ -234,11 +234,12 @@ static void uart_rx_task(void *arg) {
                         }
                     } else if (strcmp(line, "2") == 0) {
                         bool cmd = true;
-                        if (xQueueSend(audio_queue, &cmd, 0)) {
-                            uart_print("OK: audio\r\n");
-                        } else {
-                            uart_print("BUSY\r\n");
-                        }
+                        uart_print("Audio command received, but audio task is disabled in this code\r\n");
+                        // if (xQueueSend(audio_queue, &cmd, 0)) {
+                        //     uart_print("OK: audio\r\n");
+                        // } else {
+                        //     uart_print("BUSY\r\n");
+                        // }
                     } else if (strlen(line)) {
                         uart_print("?\r\n");
                     }
@@ -255,7 +256,7 @@ static void uart_rx_task(void *arg) {
 void app_main(void) {
     // Create RTOS objects first
     servo_queue = xQueueCreate(1, sizeof(bool));
-    audio_queue = xQueueCreate(1, sizeof(bool));
+    // audio_queue = xQueueCreate(1, sizeof(bool));
     uart_mutex  = xSemaphoreCreateMutex();
     ESP_LOGI(TAG, "queues ok");
 
@@ -273,14 +274,14 @@ void app_main(void) {
                  UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE);
     ESP_LOGI(TAG, "uart ok");
 
-    spiffs_init();
-    ESP_LOGI(TAG, "spiffs ok");
+    // spiffs_init();
+    // ESP_LOGI(TAG, "spiffs ok");
 
     servo_init();
     ESP_LOGI(TAG, "servo ok");
 
     xTaskCreate(uart_rx_task, "uart_rx", 4096,  NULL, 10, NULL);
     xTaskCreate(servo_task,   "servo",   4096,  NULL,  9, NULL);
-    xTaskCreatePinnedToCore(audio_task, "audio", 8192, NULL, 8, NULL, 1);
+    // xTaskCreatePinnedToCore(audio_task, "audio", 8192, NULL, 8, NULL, 1);
     ESP_LOGI(TAG, "tasks ok");
 }
