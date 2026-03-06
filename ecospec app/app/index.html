@@ -489,12 +489,12 @@
   <header>
     <div class="logo">
       <span class="logo-name">ECOSPEC</span>
-      <span class="logo-sub">Raman Spectroscopy · Microplastic Identification</span>
+      <span class="logo-sub">Raman Spectroscopy - Microplastic Identification</span>
     </div>
     <div class="header-status">
       <div class="hstat"><div class="dot"></div>Pi 5 ONLINE</div>
-      <div class="hstat"><div class="dot"></div>ESP32 OK</div>
-      <div class="hstat"><div class="dot"></div>CQD CAM</div>
+      <div class="hstat"><div class="dot warn" id="h-esp32-dot"></div>ESP32</div>
+      <div class="hstat"><div class="dot warn" id="h-cam-dot"></div>CQD CAM</div>
       <div class="hstat"><div class="dot warn" id="h-laser-dot"></div><span id="h-laser-txt">LASER STBY</span></div>
     </div>
     <div class="clock" id="clock">--:--:--</div>
@@ -541,7 +541,7 @@
         <option>250 mW (Max)</option>
       </select>
       <div class="btn-row">
-        <button class="btn btn-start" id="start-btn" onclick="startScan()">▶ SCAN</button>
+        <button class="btn btn-start" id="start-btn" onclick="startScan()" disabled>⚠ NOT READY</button>
         <button class="btn btn-stop" onclick="eStop()">■ STOP</button>
       </div>
       <div class="prog-wrap" id="prog-wrap" style="margin-top:8px;">
@@ -553,8 +553,8 @@
     <div class="panel" style="flex:1;">
       <div class="panel-title">System Status</div>
       <div class="stat-row"><span class="stat-name">Raspberry Pi 5</span><span class="stat-val ok">ONLINE</span></div>
-      <div class="stat-row"><span class="stat-name">ESP32 MCU</span><span class="stat-val ok">ONLINE</span></div>
-      <div class="stat-row"><span class="stat-name">ACUROS CQD Cam</span><span class="stat-val ok">LINKED</span></div>
+      <div class="stat-row"><span class="stat-name">ESP32 MCU</span><span class="stat-val off" id="s-esp32">CHECKING...</span></div>
+      <div class="stat-row"><span class="stat-name">ACUROS CQD Cam</span><span class="stat-val off" id="s-camera">CHECKING...</span></div>
       <div class="stat-row"><span class="stat-name">785 nm Laser</span><span class="stat-val off" id="s-laser">STANDBY</span></div>
       <div class="stat-row"><span class="stat-name">TEC Detector</span><span class="stat-val ok">−15°C OK</span></div>
       <div class="stat-row"><span class="stat-name">Interlocks</span><span class="stat-val ok">ALL CLEAR</span></div>
@@ -611,7 +611,7 @@
 </div>
 
 <script>
-// ── Clock
+// ── Clock 
 function updateClock() {
   document.getElementById('clock').textContent = new Date().toTimeString().slice(0,8);
 }
@@ -630,13 +630,11 @@ function log(msg, cls='') {
 }
 
 log('System initialized', 'ok');
-log('ACUROS CQD camera linked via eBUS SDK', 'ok');
-log('ESP32 UART connected @ 115200 bps', 'ok');
 log('TEC detector stabilized at −15°C', 'ok');
 log('All interlocks nominal', 'ok');
-log('Ready for acquisition');
+log('Checking hardware...', 'info');
 
-// ── Canvas Setup
+// ── Canvas Setup 
 const canvas = document.getElementById('specCanvas');
 const ctx = canvas.getContext('2d');
 let animId, scanInterval, scanning = false, currentSpec = null;
@@ -722,7 +720,7 @@ window.addEventListener('resize', resizeCanvas);
 resizeCanvas();
 idleLoop();
 
-// ── Scan 
+// ── Scan
 function setLaser(on) {
   const s = document.getElementById('s-laser');
   const dot = document.getElementById('h-laser-dot');
@@ -738,6 +736,14 @@ function setLaser(on) {
 
 function startScan() {
   if (scanning) return;
+
+  const esp32 = document.getElementById('s-esp32');
+  const cam   = document.getElementById('s-camera');
+  if (!esp32.className.includes('ok') || !cam.className.includes('ok')) {
+    log('Cannot scan — hardware not ready', 'err');
+    return;
+  }
+
   scanning = true;
   cancelAnimationFrame(animId);
 
@@ -904,6 +910,80 @@ async function confirmExport() {
     log(`Export error: ${e}`, 'err');
   }
 }
+
+// Hardware Detection
+function updateHardwareStatus(hw) {
+  // ESP32
+  const esp32El = document.getElementById('s-esp32');
+  if (esp32El) {
+    const changed = esp32El.textContent !== hw.esp32.status;
+    esp32El.textContent = hw.esp32.status;
+    esp32El.className   = 'stat-val ' + hw.esp32.cls;
+    if (changed) {
+      if (hw.esp32.cls === 'ok') {
+        log(`ESP32 detected on ${hw.esp32.detail}`, 'ok');
+      } else {
+        log('ESP32 not detected — check USB connection', 'err');
+      }
+    }
+  }
+
+  // Camera
+  const camEl = document.getElementById('s-camera');
+  if (camEl) {
+    const changed = camEl.textContent !== hw.camera.status;
+    camEl.textContent = hw.camera.status;
+    camEl.className   = 'stat-val ' + hw.camera.cls;
+    if (changed) {
+      if (hw.camera.cls === 'ok') {
+        log(`Camera detected on ${hw.camera.detail}`, 'ok');
+      } else {
+        log('Camera not detected — check USB connection', 'err');
+      }
+    }
+  }
+
+  // Header dots
+  const espDot = document.getElementById('h-esp32-dot');
+  if (espDot) espDot.className = 'dot' + (hw.esp32.cls === 'ok' ? '' : ' warn');
+
+  const camDot = document.getElementById('h-cam-dot');
+  if (camDot) camDot.className = 'dot' + (hw.camera.cls === 'ok' ? '' : ' warn');
+
+  // Lock scan button if hardware not ready
+  updateScanButton(hw);
+}
+
+function updateScanButton(hw) {
+  const btn = document.getElementById('start-btn');
+  if (!btn || scanning) return;
+  const allReady = hw.esp32.cls === 'ok' && hw.camera.cls === 'ok';
+  if (allReady) {
+    btn.disabled = false;
+    btn.textContent = '▶ SCAN';
+  } else {
+    btn.disabled = true;
+    const missing = [];
+    if (hw.esp32.cls  !== 'ok') missing.push('ESP32');
+    if (hw.camera.cls !== 'ok') missing.push('Camera');
+    btn.textContent = '⚠ NOT READY';
+    btn.title = `Not connected: ${missing.join(', ')}`;
+  }
+}
+
+function pollHardware() {
+  if (!window.pywebview || !window.pywebview.api) return;
+  window.pywebview.api.detect_hardware().then(hw => {
+    updateHardwareStatus(hw);
+  }).catch(() => {});
+}
+
+// Wait for PyWebView bridge, then start polling
+window.addEventListener('pywebviewready', () => {
+  pollHardware();                        // immediate check on load
+  setInterval(pollHardware, 5000);       // recheck every 5 seconds
+});
+
 </script>
 </body>
 </html>
