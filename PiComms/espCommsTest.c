@@ -12,33 +12,51 @@
 
 static const char *TAG = "main";
 
-/* ================= UART ================= */
 #define UART_NUM UART_NUM_0
 #define UART_BUF 256
 
-/* ================= SERVO ================= */
-#define SERVO_PIN   18
+#define SERVO_PIN   GPIO_NUM_18
 #define MIN_DUTY    410
 #define MAX_DUTY    2048
 
-/* ================= WAV / I2S ================= */
 // #define I2S_NUM       I2S_NUM_0
 // #define WAV_FILE_PATH "/spiffs/audio.wav"
 // #define READ_BUF_SIZE 4096
 
-/* ================= RTOS ================= */
-static QueueHandle_t     servo_queue;
-// static QueueHandle_t     audio_queue;
+#define X9C_INC    GPIO_NUM_10
+#define X9C_UD     GPIO_NUM_11
+#define X9C_CS     GPIO_NUM_12
+#define X9C_MAX_POS 127
+#define X9C_MIN_POS 0
+#define X9C_PULSE_DELAY 5
+#define X9C_PINS ((1ULL << X9C_INC) | (1ULL << X9C_UD) | (1ULL << X9C_CS))
+static bool x9c_wait_for_response = false;
+static int x9c_pos = X9C_MIN_POS;
+
+static QueueHandle_t uart_event_queue;
+static QueueHandle_t servo_queue;
+// static QueueHandle_t audio_queue;
+static QueueHandle_t x9c_queue;
 static SemaphoreHandle_t uart_mutex;
 
-/* ================= UART HELPER ================= */
+uint32_t angle_to_duty_cycle(uint8_t angle)
+{
+    if (angle > 180) angle = 180;
+    // Map angle (0° -> 0.5ms, 180° -> 2.5ms)
+    float pulse_width = 0.5 + (angle / 180.0) * 2.0;
+    // Convert pulse width to duty cycle (12-bit resolution, 50Hz)
+    uint32_t duty = (pulse_width / 20.0) * 4096;
+
+    return duty;
+}
+
 static void uart_print(const char *msg) {
     xSemaphoreTake(uart_mutex, portMAX_DELAY);
     uart_write_bytes(UART_NUM, msg, strlen(msg));
+    uart_wait_tx_done(UART_NUM, pdMS_TO_TICKS(100));
     xSemaphoreGive(uart_mutex);
 }
 
-// /* ================= WAV HEADER ================= */
 // typedef struct __attribute__((packed)) {
 //     char     riff[4];
 //     uint32_t file_size;
@@ -55,7 +73,6 @@ static void uart_print(const char *msg) {
 //     uint32_t data_size;
 // } wav_header_t;
 
-// /* ================= SPIFFS INIT ================= */
 // static void spiffs_init(void) {
 //     esp_vfs_spiffs_conf_t conf = {
 //         .base_path              = "/spiffs",
@@ -74,27 +91,88 @@ static void uart_print(const char *msg) {
 // }
 // }
 
-/* ================= SERVO INIT ================= */
-static void servo_init(void) {
+
+static void x9c_pulse(void) {
+    gpio_set_level(X9C_INC, 0);
+    ets_delay_us(X9C_PULSE_DELAY);
+    gpio_set_level(X9C_INC, 1);
+    ets_delay_us(X9C_PULSE_DELAY);
+}
+static void x9c_init(void) {
+    gpio_config_t cfg = {
+        .mode = GPIO_MODE_OUTPUT,
+        .pin_bit_mask = X9C_PINS,
+        .pull_down_en = GPIO_PULLDOWN_DISABLE,
+        .pull_up_en = GPIO_PULLUP_DISABLE,
+        .intr_type = GPIO_INTR_DISABLE
+    };
+    gpio_config(&cfg);
+
+    gpio_set_level(X9C_CS, 0); // CS low to enable
+    gpio_set_level(X9C_UD, 0); // Set direction to down
+
+    for (int i = 0; i < X9C_MAX_POS; i++) {
+        x9c_pulse();
+    }
+    x9c_pos = X9C_MAX_POS;
+
+    gpio_set_level(X9C_CS, 1); // CS high to disable
+}
+
+void x9c_set_position(uint8_t pos) {
+    if (pos < X9C_MIN_POS) pos = X9C_MIN_POS;
+    if (pos > X9C_MAX_POS) pos = X9C_MAX_POS;
+
+    char buf[32];
+    snprintf(buf, sizeof(buf), "Setting X9C to position: %d\r\n", pos);
+    uart_print(buf);
+
+    int delta = pos - x9c_pos;
+    if (delta == 0) return;
+
+    gpio_set_level(X9C_CS, 0); // CS low to enable
+    gpio_set_level(X9C_UD, delta > 0 ? 0 : 1); // Set direction
+
+    for (int i = 0; i < abs(delta); i++) {
+        x9c_pulse();
+    }
+
+    gpio_set_level(X9C_CS, 1); // CS high to disable
+    x9c_pos = pos;
+}
+
+static void x9c_task(void *arg) {
+    uint8_t pos;
+
+    while (1) {
+        if (xQueueReceive(x9c_queue, &pos, portMAX_DELAY)) {
+            x9c_set_position(pos);
+            uart_print("X9C done\r\n");
+        }
+    }
+};
+
+static void servo_init(void)
+{
     ledc_timer_config_t timer = {
-        .speed_mode      = LEDC_LOW_SPEED_MODE,
-        .timer_num       = LEDC_TIMER_0,
-        .duty_resolution = LEDC_TIMER_14_BIT,
-        .freq_hz         = 50,
-        .clk_cfg         = LEDC_USE_APB_CLK
+        .speed_mode = LEDC_HIGH_SPEED_MODE,
+        .duty_resolution = LEDC_TIMER_12_BIT,
+        .timer_num = LEDC_TIMER_0,
+        .freq_hz = 50,
+        .clk_cfg = LEDC_AUTO_CLK
     };
     ledc_timer_config(&timer);
 
     ledc_channel_config_t channel = {
-        .speed_mode = LEDC_LOW_SPEED_MODE,
-        .channel    = LEDC_CHANNEL_0,
-        .timer_sel  = LEDC_TIMER_0,
-        .gpio_num   = SERVO_PIN,
-        .duty       = MIN_DUTY,
-        .hpoint     = 0
+        .gpio_num = SERVO_PIN,
+        .speed_mode = LEDC_HIGH_SPEED_MODE,
+        .channel = LEDC_CHANNEL_0,
+        .intr_type = LEDC_INTR_DISABLE,
+        .timer_sel = LEDC_TIMER_0,
+        .duty = 0,
+        .hpoint = 0
     };
     ledc_channel_config(&channel);
-    ledc_update_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_0);
 }
 
 /* ================= SERVO TASK ================= */
@@ -106,24 +184,25 @@ static void servo_task(void *arg) {
     while (1) {
         if (xQueueReceive(servo_queue, &cmd, portMAX_DELAY)) {
             if (zero) {
-                uart_print("Servo moving to max\r\n");
-                while (duty < MAX_DUTY) {
-                    duty += 7;
-                    if (duty > MAX_DUTY) duty = MAX_DUTY;
-                    ledc_set_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_0, duty);
-                    ledc_update_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_0);
-                    vTaskDelay(pdMS_TO_TICKS(15));
+                uart_print("Servo moving to max in 10 deg. increments\r\n");
+                for(int angle = 0 ; angle <= 180 ; angle += 10)
+                {
+                    ledc_set_duty(LEDC_HIGH_SPEED_MODE, LEDC_CHANNEL_0, angle_to_duty_cycle(angle));
+                    ledc_update_duty(LEDC_HIGH_SPEED_MODE, LEDC_CHANNEL_0);
+                    vTaskDelay(pdMS_TO_TICKS(1000));
                 }
+                uart_print("Servo at max\r\n");
                 zero = false;
             } else {
-                uart_print("Servo moving to min\r\n");
-                while (duty > MIN_DUTY) {
-                    duty -= 7;
-                    if (duty < MIN_DUTY) duty = MIN_DUTY;
-                    ledc_set_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_0, duty);
-                    ledc_update_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_0);
-                    vTaskDelay(pdMS_TO_TICKS(15));
+                uart_print("Servo moving to min in 10 deg. increments\r\n");
+                for(int angle = 170 ; angle >= 10 ; angle -= 10)
+                {
+                    ESP_LOGI(TAG, "Moving to %d degrees\n", angle);
+                    ledc_set_duty(LEDC_HIGH_SPEED_MODE, LEDC_CHANNEL_0, angle_to_duty_cycle(angle));
+                    ledc_update_duty(LEDC_HIGH_SPEED_MODE, LEDC_CHANNEL_0);
+                    vTaskDelay(pdMS_TO_TICKS(1000));
                 }
+                uart_print("Servo at min\r\n");
                 zero = true;
             }
             uart_print("Servo done\r\n");
@@ -131,7 +210,6 @@ static void servo_task(void *arg) {
     }
 }
 
-// /* ================= AUDIO TASK ================= */
 // static void audio_task(void *arg) {
 //     bool cmd;
 
@@ -203,14 +281,12 @@ static void servo_task(void *arg) {
 //     }
 // }
 
-/* ================= UART RX TASK ================= */
-static QueueHandle_t uart_event_queue;
-
 static void uart_rx_task(void *arg) {
     uart_event_t event;
     uint8_t rx[UART_BUF];
     char line[32];
     int idx = 0;
+
 
     while (1) {
         if (xQueueReceive(uart_event_queue, &event, portMAX_DELAY)) {
@@ -225,6 +301,20 @@ static void uart_rx_task(void *arg) {
                     line[idx] = 0;
                     idx = 0;
 
+                    if (x9c_wait_for_response) {
+                        uint8_t pos = (uint8_t)atoi(line);
+
+                        if (xQueueSend(x9c_queue, &pos, 0)) {
+                            char msg[64];
+                            snprintf(msg, sizeof(msg), "Queued pos %d\r\n", pos);
+                            uart_print(msg);
+                        } else {
+                            uart_print("X9C BUSY\r\n");
+                        }
+
+                        x9c_wait_for_response = false;
+                    }
+
                     if (strcmp(line, "1") == 0) {
                         bool cmd = true;
                         if (xQueueSend(servo_queue, &cmd, 0)) {
@@ -232,7 +322,8 @@ static void uart_rx_task(void *arg) {
                         } else {
                             uart_print("BUSY\r\n");
                         }
-                    } else if (strcmp(line, "2") == 0) {
+                    } 
+                    else if (strcmp(line, "2") == 0) {
                         bool cmd = true;
                         uart_print("Audio command received, but audio task is disabled in this code\r\n");
                         // if (xQueueSend(audio_queue, &cmd, 0)) {
@@ -240,23 +331,30 @@ static void uart_rx_task(void *arg) {
                         // } else {
                         //     uart_print("BUSY\r\n");
                         // }
-                    } else if (strlen(line)) {
+                    }
+                    else if (strcmp(line, "3") == 0) {
+                        uart_print("OK: x9c\r\n");
+                        uart_print("Enter X9C position (0-127): ");
+                        x9c_wait_for_response = true;
+                    }
+                    else {
                         uart_print("?\r\n");
                     }
-
-                } else if (idx < (int)sizeof(line) - 1) {
+                }
+                else if (idx < (int)sizeof(line) - 1) {
                     line[idx++] = c;
                 }
+                
             }
         }
     }
 }
 
-/* ================= MAIN ================= */
 void app_main(void) {
-    // Create RTOS objects first
+
     servo_queue = xQueueCreate(1, sizeof(bool));
     // audio_queue = xQueueCreate(1, sizeof(bool));
+    x9c_queue   = xQueueCreate(1, sizeof(uint8_t));
     uart_mutex  = xSemaphoreCreateMutex();
     ESP_LOGI(TAG, "queues ok");
 
@@ -270,8 +368,7 @@ void app_main(void) {
     };
     uart_driver_install(UART_NUM, UART_BUF * 2, 0, 10, &uart_event_queue, 0);
     uart_param_config(UART_NUM, &cfg);
-    uart_set_pin(UART_NUM, UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE,
-                 UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE);
+    uart_set_pin(UART_NUM, UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE);
     ESP_LOGI(TAG, "uart ok");
 
     // spiffs_init();
@@ -280,8 +377,12 @@ void app_main(void) {
     servo_init();
     ESP_LOGI(TAG, "servo ok");
 
+    x9c_init();
+    ESP_LOGI(TAG, "x9c ok");
+
     xTaskCreate(uart_rx_task, "uart_rx", 4096,  NULL, 10, NULL);
     xTaskCreate(servo_task,   "servo",   4096,  NULL,  9, NULL);
     // xTaskCreatePinnedToCore(audio_task, "audio", 8192, NULL, 8, NULL, 1);
+    xTaskCreate(x9c_task, "x9c_task", 4096, NULL, 9, NULL);
     ESP_LOGI(TAG, "tasks ok");
 }
