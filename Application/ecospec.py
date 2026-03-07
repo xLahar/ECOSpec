@@ -9,6 +9,9 @@ import os
 import sys
 import glob
 import serial
+from hardware.cameraControl import Camera
+from hardware.espComms import espComms
+from processing.processing import process_spectrum
 
 BASE_DIR   = os.path.dirname(os.path.abspath(__file__))
 RAMAN_ROOT = os.path.join(BASE_DIR, 'app')
@@ -41,12 +44,9 @@ class EcoSpecAPI:
 
         camera_found = False
         try:
-            from harvesters.core import Harvester
-            h = Harvester()
-            h.add_file('/opt/cvb-15.00.003/drivers/genicam/libCVUSBTL.cti')
-            h.update()
-            camera_found = len(h.device_info_list) > 0
-            h.reset()
+            cam = Camera()
+            camera_found = cam.init()
+            cam.reset()
         except Exception:
             camera_found = False
 
@@ -59,89 +59,74 @@ class EcoSpecAPI:
 
     # Full Scan Pipeline 
     def run_scan(self):
-        try:
-            from hardware.cameraControl import Camera
-            from hardware.espComms import send_servo_command
-            from processing.processing import process_spectrum
+        esp = espComms('/dev/ttyS0')
 
-            try:
-                ser = serial.Serial('/dev/ttyS0', 115200, timeout=2)
-                send_servo_command(ser)
-                ser.close()
-            except serial.SerialException as e:
-                return {'ok': False, 'error': f'ESP32 serial error: {e}'}
+        if esp.ser is None:
+            return {'ok': False, 'error': 'ESP32 connection error'}
+        esp.send_servo_command(1) # Start door closure
 
-            cam = Camera()
-            cam.init()
-            cam.get_test_image()
-            cam.close()
+        cam = Camera()
+        cam.init()
+        cam.get_test_image()
+        cam.close()
 
-            raw_files = sorted(
-                glob.glob(os.path.join(RAW_DIR, '*.csv')),
-                key=os.path.getmtime,
-                reverse=True
-            )
-            if not raw_files:
-                return {'ok': False, 'error': 'No raw spectrum file found after capture'}
+        raw_files = sorted(
+            glob.glob(os.path.join(RAW_DIR, '*.csv')),
+            key=os.path.getmtime,
+            reverse=True
+        )
+        if not raw_files:
+            return {'ok': False, 'error': 'No raw spectrum file found after capture'}
 
-            latest_file = os.path.basename(raw_files[0])
+        latest_file = os.path.basename(raw_files[0])
 
-            best_match, best_r, top3, x, y = process_spectrum(
-                latest_file,
-                log_callback=None
-            )
+        best_match, best_r, top3, x, y = process_spectrum(
+            latest_file,
+            log_callback=None
+        )
 
-            y_list = list(y)
-            mn, mx = min(y_list), max(y_list)
-            y_norm = [(v - mn) / (mx - mn) for v in y_list] if mx - mn > 1e-9 else [0.0] * len(y_list)
-            matches = [{'name': name, 'r': round(float(r_val), 4)} for name, r_val in top3]
+        y_list = list(y)
+        mn, mx = min(y_list), max(y_list)
+        y_norm = [(v - mn) / (mx - mn) for v in y_list] if mx - mn > 1e-9 else [0.0] * len(y_list)
+        matches = [{'name': name, 'r': round(float(r_val), 4)} for name, r_val in top3]
 
-            return {
-                'ok':      True,
-                'spectrum': y_norm,
-                'shifts':  [int(v) for v in x],
-                'match':   best_match,
-                'r':       round(float(best_r), 4),
-                'matches': matches,
-                'file':    latest_file,
-            }
-
-        except Exception as e:
-            return {'ok': False, 'error': str(e)}
+        return {
+            'ok':      True,
+            'spectrum': y_norm,
+            'shifts':  [int(v) for v in x],
+            'match':   best_match,
+            'r':       round(float(best_r), 4),
+            'matches': matches,
+            'file':    latest_file,
+        }
 
     # ── Debug Scan ────────────────────────────────────────────────
     def debug_scan(self, filename):
-        try:
-            from processing.processing import process_spectrum
+        raw_path = os.path.join(RAW_DIR, filename)
+        if not os.path.exists(raw_path):
+            available = [os.path.basename(f) for f in glob.glob(os.path.join(RAW_DIR, '*.csv'))]
+            return {'ok': False, 'error': f'File not found: {filename}', 'available': available}
 
-            raw_path = os.path.join(RAW_DIR, filename)
-            if not os.path.exists(raw_path):
-                available = [os.path.basename(f) for f in glob.glob(os.path.join(RAW_DIR, '*.csv'))]
-                return {'ok': False, 'error': f'File not found: {filename}', 'available': available}
+        best_match, best_r, top3, x, y = process_spectrum(
+            filename,
+            log_callback=None
+        )
 
-            best_match, best_r, top3, x, y = process_spectrum(
-                filename,
-                log_callback=None
-            )
+        y_list = list(y)
+        mn, mx = min(y_list), max(y_list)
+        y_norm = [(v - mn) / (mx - mn) for v in y_list] if mx - mn > 1e-9 else [0.0] * len(y_list)
+        matches = [{'name': name, 'r': round(float(r_val), 4)} for name, r_val in top3]
 
-            y_list = list(y)
-            mn, mx = min(y_list), max(y_list)
-            y_norm = [(v - mn) / (mx - mn) for v in y_list] if mx - mn > 1e-9 else [0.0] * len(y_list)
-            matches = [{'name': name, 'r': round(float(r_val), 4)} for name, r_val in top3]
-
-            return {
-                'ok':      True,
-                'spectrum': y_norm,
-                'shifts':  [int(v) for v in x],
-                'match':   best_match,
-                'r':       round(float(best_r), 4),
-                'matches': matches,
-                'file':    filename,
-                'debug':   True,
-            }
-
-        except Exception as e:
-            return {'ok': False, 'error': str(e)}
+        return {
+            'ok':      True,
+            'spectrum': y_norm,
+            'shifts':  [int(v) for v in x],
+            'match':   best_match,
+            'r':       round(float(best_r), 4),
+            'matches': matches,
+            'file':    filename,
+            'debug':   True,
+        }
 
     # List Raw Files 
     def list_raw_files(self):

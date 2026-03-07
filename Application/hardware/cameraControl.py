@@ -24,6 +24,7 @@ class Camera:
 
         self.ia = self.h.create(0)
         time.sleep(1)
+        return True
 
     def read_image_info(self):
         nm = self.ia.remote_device.node_map
