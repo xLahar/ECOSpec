@@ -34,7 +34,7 @@
     -webkit-user-select: none;
   }
 
-  /* ── Layout ── */
+  /*  Layout  */
   #app {
     display: grid;
     grid-template-rows: 42px 1fr 1fr;
@@ -45,7 +45,7 @@
     width: 100%;
   }
 
-  /* ── Header ── */
+  /*  Header  */
   header {
     grid-column: 1 / -1;
     display: flex;
@@ -109,7 +109,7 @@
     letter-spacing: 2px;
   }
 
-  /* ── Panels ── */
+  /*  Panels  */
   .panel {
     background: var(--panel);
     border: 1px solid var(--border);
@@ -136,7 +136,7 @@
     font-style: normal;
   }
 
-  /* ── Spectrum Canvas ── */
+  /*  Spectrum Canvas  */
   #specWrap {
     grid-row: 2;
     grid-column: 1;
@@ -159,7 +159,7 @@
     padding: 0 2px;
   }
 
-  /* ── Bottom Left: Result + Log ── */
+  /*  Bottom Left: Result + Log  */
   #bottomLeft {
     grid-row: 3;
     grid-column: 1;
@@ -170,7 +170,7 @@
     min-height: 0;
   }
 
-  /* ── Result Panel ── */
+  /*  Result Panel */
   .result-name {
     font-size: 20px;
     font-weight: 700;
@@ -346,7 +346,7 @@
   .modal-btn-save   { background: var(--accent); color: #000; }
   .modal-btn-save:active { opacity: 0.8; }
 
-  /* ── Log Panel ── */
+  /*  Log Panel  */
   .log {
     flex: 1;
     min-height: 0;
@@ -370,7 +370,7 @@
   .log-msg.err  { color: var(--err); }
   .log-msg.info { color: var(--accent); }
 
-  /* ── Right Column: Controls + Status ── */
+  /*  Right Column: Controls + Status  */
   #rightCol {
     grid-row: 2 / 4;
     grid-column: 2;
@@ -505,8 +505,8 @@
     <div class="panel-title">Live Raman Spectrum &nbsp;<em id="scan-status">· IDLE</em></div>
     <canvas id="specCanvas"></canvas>
     <div class="x-labels">
-      <span>500</span><span>700</span><span>900</span><span>1100</span>
-      <span>1300</span><span>1500</span><span>1700</span><span>1900 cm⁻¹</span>
+      <span>200</span><span>600</span><span>1000</span><span>1400</span>
+      <span>1800</span><span>2200</span><span>2800</span><span>3400 cm⁻¹</span>
     </div>
   </div>
 
@@ -608,17 +608,33 @@
   </div>
 </div>
 
+<!-- Debug Modal -->
+<div class="modal-overlay" id="debug-modal">
+  <div class="modal">
+    <h3>⚙ Debug — Pipeline Test</h3>
+    <span class="modal-label">Select a raw spectrum file</span>
+    <select class="modal-input" id="debug-file-select" style="margin-bottom:16px;"></select>
+    <span class="modal-label" style="color:var(--warn); margin-bottom:12px; display:block;">
+      ⚠ Hardware will be skipped — processing pipeline only
+    </span>
+    <div class="modal-btns">
+      <button class="modal-btn modal-btn-cancel" onclick="closeDebugModal()">CANCEL</button>
+      <button class="modal-btn modal-btn-save" onclick="runDebugScan()">RUN DEBUG SCAN</button>
+    </div>
+  </div>
+</div>
+
 </div>
 
 <script>
-// ── Clock 
+// Clock 
 function updateClock() {
   document.getElementById('clock').textContent = new Date().toTimeString().slice(0,8);
 }
 setInterval(updateClock, 1000);
 updateClock();
 
-// ── Log 
+//  Log 
 function ts() { return new Date().toTimeString().slice(0,8); }
 function log(msg, cls='') {
   const el = document.getElementById('log');
@@ -634,7 +650,7 @@ log('TEC detector stabilized at −15°C', 'ok');
 log('All interlocks nominal', 'ok');
 log('Checking hardware...', 'info');
 
-// ── Canvas Setup 
+//  Canvas Setup 
 const canvas = document.getElementById('specCanvas');
 const ctx = canvas.getContext('2d');
 let animId, scanInterval, scanning = false, currentSpec = null;
@@ -720,7 +736,7 @@ window.addEventListener('resize', resizeCanvas);
 resizeCanvas();
 idleLoop();
 
-// ── Scan
+//  Scan
 function setLaser(on) {
   const s = document.getElementById('s-laser');
   const dot = document.getElementById('h-laser-dot');
@@ -750,26 +766,30 @@ function startScan() {
   document.getElementById('start-btn').disabled = true;
   document.getElementById('start-btn').textContent = '⏳ SCANNING';
   document.getElementById('prog-wrap').classList.add('show');
+  document.getElementById('prog-label').textContent = 'Positioning sample...';
+  document.getElementById('prog-fill').style.width = '0%';
   document.getElementById('scan-status').textContent = '· ACQUIRING';
   setLaser(true);
 
   log('Scan initiated', 'info');
   log('Laser enabled — 785 nm, 150 mW', 'info');
+  log('Sending servo command to ESP32...', 'info');
 
-  const raw = noise(), target = peSpectrum();
-  let pct = 0;
   const steps = [
-    [0,  'Acquiring raw frames...'],
-    [18, 'Median noise filter...'],
-    [36, '7th-order polynomial baseline removal...'],
-    [54, 'SNV normalization...'],
-    [72, 'Min-max intensity scaling...'],
-    [88, 'Pearson similarity matching vs library...'],
+    [10, 'Positioning sample via servo...'],
+    [25, 'Initialising camera...'],
+    [40, 'Capturing raw spectrum...'],
+    [55, 'Applying median filter...'],
+    [65, '7th-order polynomial baseline removal...'],
+    [75, 'SNV normalisation...'],
+    [85, 'Min-max scaling...'],
+    [92, 'Pearson similarity matching vs library...'],
   ];
   const logged = new Set();
+  let pct = 0;
 
-  scanInterval = setInterval(() => {
-    pct = Math.min(100, pct + 1.4);
+  const progressInterval = setInterval(() => {
+    if (pct < 90) pct += 0.3;
     document.getElementById('prog-fill').style.width = pct + '%';
     steps.forEach(([th, msg]) => {
       if (pct >= th && !logged.has(th)) {
@@ -778,16 +798,33 @@ function startScan() {
         document.getElementById('prog-label').textContent = msg;
       }
     });
-    const b = Math.min(1, pct/100*1.3);
-    currentSpec = raw.map((v,i) => v*(1-b) + target[i]*b);
-    draw(currentSpec);
-    if (pct >= 100) { clearInterval(scanInterval); finishScan(); }
-  }, 50);
+    draw(noise());
+  }, 100);
+
+  window.pywebview.api.run_scan().then(result => {
+    clearInterval(progressInterval);
+    document.getElementById('prog-fill').style.width = '100%';
+
+    if (!result.ok) {
+      log(`Scan error: ${result.error}`, 'err');
+      eStop();
+      return;
+    }
+
+    log(`Spectrum captured — ${result.spectrum.length} points`, 'ok');
+    log(`Raw file: ${result.file}`, 'info');
+    finishScan(result);
+
+  }).catch(err => {
+    clearInterval(progressInterval);
+    log(`Scan failed: ${err}`, 'err');
+    eStop();
+  });
 }
 
-function finishScan() {
+function finishScan(result) {
   scanning = false;
-  currentSpec = peSpectrum();
+  currentSpec = result.spectrum;
   draw(currentSpec);
 
   document.getElementById('start-btn').disabled = false;
@@ -796,36 +833,43 @@ function finishScan() {
   document.getElementById('scan-status').textContent = '· COMPLETE';
   setLaser(false);
 
+  const pct = Math.round(result.r * 100);
   log('Scan complete', 'ok');
-  log('Result: Polyethylene (PE) — 93.6%', 'ok');
+  log(`Result: ${result.match} — ${pct}%`, 'ok');
   document.getElementById('export-btn').style.display = 'block';
 
+  const matchRows = result.matches.map((m, i) => {
+    const p   = Math.round(m.r * 100);
+    const cls = i === 0 ? 'hi' : p > 60 ? 'mid' : 'lo';
+    const top = i === 0 ? ' top' : '';
+    return `
+      <div class="match-row${top}">
+        <span><span class="match-rank">#${i+1}</span>${m.name}</span>
+        <span class="match-pct ${cls}">${p}%</span>
+      </div>`;
+  }).join('');
+
   document.getElementById('result-area').innerHTML = `
-    <div class="result-name">Polyethylene</div>
-    <div class="result-formula">PE · (C₂H₄)ₙ · MW ~28 g/mol</div>
+    <div class="result-name">${result.match}</div>
     <div class="confidence-wrap">
-      <div class="confidence-label"><span>Pearson Similarity</span><span>93.6%</span></div>
-      <div class="bar-track"><div class="bar-fill" style="width:0%" id="conf-bar"></div></div>
-    </div>
-    <div class="matches">
-      <div class="match-row top">
-        <span><span class="match-rank">#1</span>Polyethylene (PE)</span>
-        <span class="match-pct hi">93.6%</span>
+      <div class="confidence-label">
+        <span>Pearson Similarity</span><span>${pct}%</span>
       </div>
-      <div class="match-row">
-        <span><span class="match-rank">#2</span>Polypropylene (PP)</span>
-        <span class="match-pct mid">71.2%</span>
-      </div>
-      <div class="match-row">
-        <span><span class="match-rank">#3</span>Polystyrene (PS)</span>
-        <span class="match-pct lo">44.8%</span>
-      </div>
-      <div class="match-row">
-        <span><span class="match-rank">#4</span>PET</span>
-        <span class="match-pct lo">31.5%</span>
+      <div class="bar-track">
+        <div class="bar-fill" style="width:0%" id="conf-bar"></div>
       </div>
     </div>
+    <div class="matches">${matchRows}</div>
   `;
+
+  requestAnimationFrame(() => {
+    requestAnimationFrame(() => {
+      const bar = document.getElementById('conf-bar');
+      if (bar) bar.style.width = pct + '%';
+    });
+  });
+}
+
   // Animate bar
   requestAnimationFrame(() => {
     requestAnimationFrame(() => {
@@ -833,7 +877,7 @@ function finishScan() {
       if (bar) bar.style.width = '93.6%';
     });
   });
-}
+
 
 function eStop() {
   clearInterval(scanInterval);
@@ -983,6 +1027,86 @@ window.addEventListener('pywebviewready', () => {
   pollHardware();                        // immediate check on load
   setInterval(pollHardware, 5000);       // recheck every 5 seconds
 });
+
+// Debug Mode 
+let logoTapCount = 0;
+let logoTapTimer = null;
+
+document.querySelector('.logo-name').addEventListener('click', () => {
+  logoTapCount++;
+  clearTimeout(logoTapTimer);
+  logoTapTimer = setTimeout(() => { logoTapCount = 0; }, 2000);
+  if (logoTapCount >= 5) {
+    logoTapCount = 0;
+    openDebugPanel();
+  }
+});
+
+function openDebugPanel() {
+  window.pywebview.api.list_raw_files().then(files => {
+    const options = files.length > 0
+      ? files.map(f => `<option value="${f}">${f}</option>`).join('')
+      : '<option value="">No raw files found</option>';
+
+    document.getElementById('debug-file-select').innerHTML = options;
+    document.getElementById('debug-modal').classList.add('show');
+    log('Debug mode opened', 'info');
+  });
+}
+
+function closeDebugModal() {
+  document.getElementById('debug-modal').classList.remove('show');
+}
+
+function runDebugScan() {
+  const sel = document.getElementById('debug-file-select');
+  const filename = sel.value;
+  if (!filename) {
+    log('Debug: no file selected', 'err');
+    return;
+  }
+
+  closeDebugModal();
+  scanning = true;
+  cancelAnimationFrame(animId);
+
+  document.getElementById('start-btn').disabled = true;
+  document.getElementById('start-btn').textContent = '⏳ SCANNING';
+  document.getElementById('prog-wrap').classList.add('show');
+  document.getElementById('prog-label').textContent = 'Debug: processing pipeline...';
+  document.getElementById('prog-fill').style.width = '0%';
+  document.getElementById('scan-status').textContent = '· DEBUG';
+
+  log(`Debug scan started — ${filename}`, 'info');
+  log('Skipping hardware — running pipeline only...', 'info');
+
+  let pct = 0;
+  const progressInterval = setInterval(() => {
+    if (pct < 90) pct += 0.8;
+    document.getElementById('prog-fill').style.width = pct + '%';
+    draw(noise());
+  }, 100);
+
+  window.pywebview.api.debug_scan(filename).then(result => {
+    clearInterval(progressInterval);
+    document.getElementById('prog-fill').style.width = '100%';
+
+    if (!result.ok) {
+      log(`Debug error: ${result.error}`, 'err');
+      if (result.available) log(`Available files: ${result.available.join(', ')}`, 'info');
+      eStop();
+      return;
+    }
+
+    log(`Debug pipeline complete — ${result.spectrum.length} points`, 'ok');
+    finishScan(result);
+
+  }).catch(err => {
+    clearInterval(progressInterval);
+    log(`Debug failed: ${err}`, 'err');
+    eStop();
+  });
+}
 
 </script>
 </body>
