@@ -302,7 +302,22 @@ static void uart_rx_task(void *arg) {
                     idx = 0;
 
                     if (x9c_wait_for_response) {
-                        uint8_t pos = (uint8_t)atoi(line);
+                        char clean_line[16];
+                        int j = 0;
+                        for (int i = 0; i < (int)strlen(line) && j < (int)sizeof(clean_line)-1; i++) {
+                            if (line[i] >= '0' && line[i] <= '9') {
+                                clean_line[j++] = line[i];
+                            }
+                        }
+                        clean_line[j] = '\0';
+
+                        if (clean_line[0] == '\0') {
+                            uart_print("Invalid input, must be 0-127\r\n");
+                            x9c_wait_for_response = false;
+                            continue;
+                        }
+
+                        uint8_t pos = (uint8_t)atoi(clean_line);
 
                         if (xQueueSend(x9c_queue, &pos, 0)) {
                             char msg[64];
