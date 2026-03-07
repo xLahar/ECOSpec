@@ -100,10 +100,10 @@ static void x9c_pulse(void) {
 }
 static void x9c_init(void) {
     gpio_config_t cfg = {
-        .mode = GPIO_MODE_OUTPUT,
         .pin_bit_mask = X9C_PINS,
-        .pull_down_en = GPIO_PULLDOWN_DISABLE,
+        .mode = GPIO_MODE_OUTPUT,
         .pull_up_en = GPIO_PULLUP_DISABLE,
+        .pull_down_en = GPIO_PULLDOWN_DISABLE,
         .intr_type = GPIO_INTR_DISABLE
     };
     gpio_config(&cfg);
