@@ -13,13 +13,25 @@ This is the setup guide for running ECOSpec on a Raspberry Pi 5 with a 1024×600
 
 If you've downloaded the zip on the Pi already, unzip it and you should have an `ecospec/` folder. The structure inside looks like this:
 
-
 ecospec/
 ├── ecospec.py
-├── run.sh
 ├── ecospec@.service
+├── README.md
+├── run.sh
+├── ui/
+│   └── index.html
 └── app/
-    └── index.html
+    ├── app.py
+    ├── hardware/
+    │   ├── cameraControl.py
+    │   └── espComms.py
+    └── processing/
+        ├── processing.py
+        └── spectra/
+            ├── lib/
+            │   └── lib.csv
+            ├── processed/
+            └── raw/
 
 
 Before you can run it, you need to make the launch script executable:
@@ -45,3 +57,8 @@ If you want the app to take up the whole screen with no window titlebar, open `e
 
 fullscreen=True,
 frameless=True,
+
+## Debug Mode
+
+If you want to bypass actively using the ESP32, Acuros CAM, etc...
+You can click on the ECOSpec logo in the top left 5 times to open a debug mode that allows you to process data from a .csv file
