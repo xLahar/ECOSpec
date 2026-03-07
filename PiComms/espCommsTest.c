@@ -15,6 +15,9 @@ static const char *TAG = "main";
 #define UART_NUM UART_NUM_0
 #define UART_BUF 256
 
+#define LASER_ENABLE GPIO_NUM_26
+#define LASER_SHUTOFF GPIO_NUM_19
+
 #define SERVO_PIN   GPIO_NUM_33
 #define MIN_DUTY    410
 #define MAX_DUTY    2048
@@ -25,11 +28,10 @@ static const char *TAG = "main";
 
 #define X9C_INC    GPIO_NUM_14
 #define X9C_UD     GPIO_NUM_27
-#define X9C_CS     GPIO_NUM_26
 #define X9C_MAX_POS 127
 #define X9C_MIN_POS 0
-#define X9C_PULSE_DELAY 5
-#define X9C_PINS ((1ULL << X9C_INC) | (1ULL << X9C_UD) | (1ULL << X9C_CS))
+#define X9C_PULSE_DELAY 50
+#define X9C_PINS ((1ULL << X9C_INC) | (1ULL << X9C_UD))
 static bool x9c_wait_for_response = false;
 static int x9c_pos = X9C_MIN_POS;
 
@@ -93,10 +95,12 @@ static void uart_print(const char *msg) {
 
 
 static void x9c_pulse(void) {
-    gpio_set_level(X9C_INC, 0);
-    ets_delay_us(X9C_PULSE_DELAY);
     gpio_set_level(X9C_INC, 1);
     ets_delay_us(X9C_PULSE_DELAY);
+    gpio_set_level(X9C_INC, 0);
+    ets_delay_us(X9C_PULSE_DELAY);
+
+    x9c_pos = (gpio_get_level(X9C_UD) == 1) ? x9c_pos + 1 : x9c_pos - 1;
 }
 static void x9c_init(void) {
     gpio_config_t cfg = {
@@ -108,15 +112,13 @@ static void x9c_init(void) {
     };
     gpio_config(&cfg);
 
-    gpio_set_level(X9C_CS, 0); // CS low to enable
     gpio_set_level(X9C_UD, 0); // Set direction to down
+    ets_delay_us(X9C_PULSE_DELAY);
 
     for (int i = 0; i < X9C_MAX_POS; i++) {
         x9c_pulse();
     }
-    x9c_pos = X9C_MAX_POS;
-
-    gpio_set_level(X9C_CS, 1); // CS high to disable
+    x9c_pos = X9C_MIN_POS;
 }
 
 void x9c_set_position(uint8_t pos) {
@@ -128,17 +130,19 @@ void x9c_set_position(uint8_t pos) {
     uart_print(buf);
 
     int delta = pos - x9c_pos;
+    snprintf(buf, sizeof(buf), "Current pos: %d, Delta: %d\r\n", x9c_pos, delta);
+    uart_print(buf);
     if (delta == 0) return;
 
-    gpio_set_level(X9C_CS, 0); // CS low to enable
-    gpio_set_level(X9C_UD, delta > 0 ? 0 : 1); // Set direction
+    gpio_set_level(X9C_UD, delta > 0 ? 1 : 0); // Set direction
+    ets_delay_us(X9C_PULSE_DELAY);
 
     for (int i = 0; i < abs(delta); i++) {
         x9c_pulse();
     }
 
-    gpio_set_level(X9C_CS, 1); // CS high to disable
-    x9c_pos = pos;
+    snprintf(buf, sizeof(buf), "X9C position set to %d\r\n", x9c_pos);
+    uart_print(buf);
 }
 
 static void x9c_task(void *arg) {
@@ -281,12 +285,17 @@ static void servo_task(void *arg) {
 //     }
 // }
 
+typedef enum {
+    UART_STATE_MENU,
+    UART_STATE_X9C_INPUT
+} uart_state_t;
+
 static void uart_rx_task(void *arg) {
     uart_event_t event;
     uint8_t rx[UART_BUF];
     char line[32];
     int idx = 0;
-
+    uart_state_t state = UART_STATE_MENU;
 
     while (1) {
         if (xQueueReceive(uart_event_queue, &event, portMAX_DELAY)) {
@@ -297,69 +306,67 @@ static void uart_rx_task(void *arg) {
             for (int i = 0; i < len; i++) {
                 char c = rx[i];
 
+                // End-of-line received
                 if (c == '\r' || c == '\n') {
-                    line[idx] = 0;
+                    if (idx == 0) continue; // ignore empty lines
+                    line[idx] = '\0';
                     idx = 0;
 
-                    if (x9c_wait_for_response) {
+                    char dbg[64];
+                    snprintf(dbg, sizeof(dbg), "DEBUG: line='%s', state=%d\r\n", line, state);
+                    uart_print(dbg);
+
+                    if (state == UART_STATE_MENU) {
+                        // Menu commands
+                        if (strcmp(line, "1") == 0) {
+                            bool cmd = true;
+                            if (xQueueSend(servo_queue, &cmd, 0)) uart_print("OK: servo\r\n");
+                            else uart_print("BUSY\r\n");
+                        } else if (strcmp(line, "2") == 0) {
+                            uart_print("Audio task disabled\r\n");
+                        } else if (strcmp(line, "3") == 0) {
+                            uart_print("OK: x9c\r\nEnter X9C position (0-127): \r\n");
+                            state = UART_STATE_X9C_INPUT;
+                        } else {
+                            uart_print("?\r\n");
+                        }
+                    }
+                    else if (state == UART_STATE_X9C_INPUT) {
+                        // Numeric input for X9C
                         char clean_line[16];
                         int j = 0;
-                        for (int i = 0; i < (int)strlen(line) && j < (int)sizeof(clean_line)-1; i++) {
-                            if (line[i] >= '0' && line[i] <= '9') {
-                                clean_line[j++] = line[i];
-                            }
+                        for (int k = 0; k < (int)strlen(line) && j < (int)sizeof(clean_line)-1; k++) {
+                            if (line[k] >= '0' && line[k] <= '9') clean_line[j++] = line[k];
                         }
                         clean_line[j] = '\0';
 
                         if (clean_line[0] == '\0') {
                             uart_print("Invalid input, must be 0-127\r\n");
-                            x9c_wait_for_response = false;
-                            continue;
-                        }
-
-                        uint8_t pos = (uint8_t)atoi(clean_line);
-
-                        if (xQueueSend(x9c_queue, &pos, 0)) {
-                            char msg[64];
-                            snprintf(msg, sizeof(msg), "Queued pos %d\r\n", pos);
-                            uart_print(msg);
                         } else {
-                            uart_print("X9C BUSY\r\n");
+                            uint8_t pos = (uint8_t)atoi(clean_line);
+                            if (pos > X9C_MAX_POS) pos = X9C_MAX_POS;
+
+                            if (xQueueSend(x9c_queue, &pos, 0)) {
+                                char msg[64];
+                                snprintf(msg, sizeof(msg), "Queued X9C pos %d\r\n", pos);
+                                uart_print(msg);
+                            } else {
+                                uart_print("X9C BUSY\r\n");
+                            }
                         }
 
-                        x9c_wait_for_response = false;
-                    }
-
-                    if (strcmp(line, "1") == 0) {
-                        bool cmd = true;
-                        if (xQueueSend(servo_queue, &cmd, 0)) {
-                            uart_print("OK: servo\r\n");
-                        } else {
-                            uart_print("BUSY\r\n");
-                        }
-                    } 
-                    else if (strcmp(line, "2") == 0) {
-                        bool cmd = true;
-                        uart_print("Audio command received, but audio task is disabled in this code\r\n");
-                        // if (xQueueSend(audio_queue, &cmd, 0)) {
-                        //     uart_print("OK: audio\r\n");
-                        // } else {
-                        //     uart_print("BUSY\r\n");
-                        // }
-                    }
-                    else if (strcmp(line, "3") == 0) {
-                        uart_print("OK: x9c\r\n");
-                        uart_print("Enter X9C position (0-127): ");
-                        x9c_wait_for_response = true;
-                    }
-                    else {
-                        uart_print("?\r\n");
+                        // Return to menu state
+                        state = UART_STATE_MENU;
                     }
                 }
-                else if (idx < (int)sizeof(line) - 1) {
+                // Normal character
+                else if (idx < (int)sizeof(line)-1) {
                     line[idx++] = c;
+                } else {
+                    // Overflow
+                    uart_print("Line too long, input ignored\r\n");
+                    idx = 0;
                 }
-                
             }
         }
     }
