@@ -25,7 +25,7 @@ static const char *TAG = "main";
 
 #define X9C_INC    GPIO_NUM_14
 #define X9C_UD     GPIO_NUM_27
-#define X9C_CS     GPIO_NUM_12
+#define X9C_CS     GPIO_NUM_26
 #define X9C_MAX_POS 127
 #define X9C_MIN_POS 0
 #define X9C_PULSE_DELAY 5
