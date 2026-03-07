@@ -15,7 +15,7 @@ static const char *TAG = "main";
 #define UART_NUM UART_NUM_0
 #define UART_BUF 256
 
-#define SERVO_PIN   GPIO_NUM_18
+#define SERVO_PIN   GPIO_NUM_33
 #define MIN_DUTY    410
 #define MAX_DUTY    2048
 
@@ -23,8 +23,8 @@ static const char *TAG = "main";
 // #define WAV_FILE_PATH "/spiffs/audio.wav"
 // #define READ_BUF_SIZE 4096
 
-#define X9C_INC    GPIO_NUM_10
-#define X9C_UD     GPIO_NUM_11
+#define X9C_INC    GPIO_NUM_14
+#define X9C_UD     GPIO_NUM_27
 #define X9C_CS     GPIO_NUM_12
 #define X9C_MAX_POS 127
 #define X9C_MIN_POS 0
