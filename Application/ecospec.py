@@ -14,10 +14,12 @@ from hardware.espComms import espComms
 from processing.processing import process_spectrum
 
 BASE_DIR   = os.path.dirname(os.path.abspath(__file__))
-RAMAN_ROOT = os.path.join(BASE_DIR, 'app')
+RAMAN_ROOT = BASE_DIR
 HTML_PATH  = os.path.join(BASE_DIR, 'ui', 'index.html')
-RAW_DIR    = os.path.join(RAMAN_ROOT, 'processing', 'spectra', 'raw')
-ICON_PATH  = os.path.join(BASE_DIR, 'ECOspec_logo.png')
+RAW_DIR    = os.path.join(BASE_DIR, 'processing', 'spectra', 'raw')
+
+if BASE_DIR not in sys.path:
+    sys.path.insert(0, BASE_DIR)
 
 if RAMAN_ROOT not in sys.path:
     sys.path.insert(0, RAMAN_ROOT)
@@ -169,7 +171,6 @@ def main():
     debug=False,
     gui='gtk',
     http_server=False,
-    icon=ICON_PATH,
 )
 
 
