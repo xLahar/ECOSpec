@@ -13,6 +13,7 @@ This is the setup guide for running ECOSpec on a Raspberry Pi 5 with a 1024×600
 
 If you've downloaded the zip on the Pi already, unzip it and you should have an `ecospec/` folder. The structure inside looks like this:
 
+Folder Topology:
 ecospec/
 ├── ecospec.py
 ├── ecospec@.service
