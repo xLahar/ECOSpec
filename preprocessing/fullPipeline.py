@@ -67,7 +67,6 @@ def interpolate_spectrum(df: pd.DataFrame) -> pd.DataFrame:
         "INTENSITY_RAW": interp_intensity
     })
 
-
 def preprocess_spectrum(df_proc: pd.DataFrame):
     """Apply filtering, baseline correction, normalization."""
 
