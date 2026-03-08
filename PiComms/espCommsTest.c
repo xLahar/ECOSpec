@@ -8,6 +8,7 @@
 #include "esp_system.h"
 #include "esp_log.h"
 #include "esp_spiffs.h"
+#include "esp_rom_sys.h"
 #include <string.h>
 
 static const char *TAG = "main";
@@ -18,13 +19,15 @@ static const char *TAG = "main";
 #define LASER_ENABLE GPIO_NUM_26
 #define LASER_SHUTOFF GPIO_NUM_19
 
+#define FAN_ENABLE GPIO_NUM_34
+
 #define SERVO_PIN   GPIO_NUM_33
 #define MIN_DUTY    410
 #define MAX_DUTY    2048
 
-// #define I2S_NUM       I2S_NUM_0
-// #define WAV_FILE_PATH "/spiffs/audio.wav"
-// #define READ_BUF_SIZE 4096
+#define I2S_NUM       I2S_NUM_0
+#define WAV_FILE_PATH "/spiffs/audio.wav"
+#define READ_BUF_SIZE 4096
 
 #define X9C_INC    GPIO_NUM_14
 #define X9C_UD     GPIO_NUM_27
@@ -32,12 +35,11 @@ static const char *TAG = "main";
 #define X9C_MIN_POS 0
 #define X9C_PULSE_DELAY 50
 #define X9C_PINS ((1ULL << X9C_INC) | (1ULL << X9C_UD))
-static bool x9c_wait_for_response = false;
 static int x9c_pos = X9C_MIN_POS;
 
 static QueueHandle_t uart_event_queue;
 static QueueHandle_t servo_queue;
-// static QueueHandle_t audio_queue;
+static QueueHandle_t audio_queue;
 static QueueHandle_t x9c_queue;
 static SemaphoreHandle_t uart_mutex;
 
@@ -59,46 +61,46 @@ static void uart_print(const char *msg) {
     xSemaphoreGive(uart_mutex);
 }
 
-// typedef struct __attribute__((packed)) {
-//     char     riff[4];
-//     uint32_t file_size;
-//     char     wave[4];
-//     char     fmt[4];
-//     uint32_t fmt_size;
-//     uint16_t audio_format;
-//     uint16_t num_channels;
-//     uint32_t sample_rate;
-//     uint32_t byte_rate;
-//     uint16_t block_align;
-//     uint16_t bits_per_sample;
-//     char     data[4];
-//     uint32_t data_size;
-// } wav_header_t;
+typedef struct __attribute__((packed)) {
+    char     riff[4];
+    uint32_t file_size;
+    char     wave[4];
+    char     fmt[4];
+    uint32_t fmt_size;
+    uint16_t audio_format;
+    uint16_t num_channels;
+    uint32_t sample_rate;
+    uint32_t byte_rate;
+    uint16_t block_align;
+    uint16_t bits_per_sample;
+    char     data[4];
+    uint32_t data_size;
+} wav_header_t;
 
-// static void spiffs_init(void) {
-//     esp_vfs_spiffs_conf_t conf = {
-//         .base_path              = "/spiffs",
-//         .partition_label        = NULL,
-//         .max_files              = 5,
-//         .format_if_mount_failed = true,
-//     };
-//     ESP_ERROR_CHECK(esp_vfs_spiffs_register(&conf));
-//     ESP_LOGI(TAG, "SPIFFS mounted");
-//     FILE *f = fopen("/spiffs/audio.wav", "rb");
-// if (f) {
-//     ESP_LOGI(TAG, "audio.wav found");
-//     fclose(f);
-// } else {
-//     ESP_LOGI(TAG, "audio.wav NOT found");
-// }
-// }
+static void spiffs_init(void) {
+    esp_vfs_spiffs_conf_t conf = {
+        .base_path              = "/spiffs",
+        .partition_label        = NULL,
+        .max_files              = 5,
+        .format_if_mount_failed = true,
+    };
+    ESP_ERROR_CHECK(esp_vfs_spiffs_register(&conf));
+    ESP_LOGI(TAG, "SPIFFS mounted");
+    FILE *f = fopen("/spiffs/audio.wav", "rb");
+if (f) {
+    ESP_LOGI(TAG, "audio.wav found");
+    fclose(f);
+} else {
+    ESP_LOGI(TAG, "audio.wav NOT found");
+}
+}
 
 
 static void x9c_pulse(void) {
     gpio_set_level(X9C_INC, 1);
-    ets_delay_us(X9C_PULSE_DELAY);
+    esp_rom_delay_us(X9C_PULSE_DELAY);
     gpio_set_level(X9C_INC, 0);
-    ets_delay_us(X9C_PULSE_DELAY);
+    esp_rom_delay_us(X9C_PULSE_DELAY);
 
     x9c_pos = (gpio_get_level(X9C_UD) == 1) ? x9c_pos + 1 : x9c_pos - 1;
 }
@@ -113,7 +115,7 @@ static void x9c_init(void) {
     gpio_config(&cfg);
 
     gpio_set_level(X9C_UD, 0); // Set direction to down
-    ets_delay_us(X9C_PULSE_DELAY);
+    esp_rom_delay_us(X9C_PULSE_DELAY);
 
     for (int i = 0; i < X9C_MAX_POS; i++) {
         x9c_pulse();
@@ -125,7 +127,7 @@ void x9c_set_position(uint8_t pos) {
     if (pos < X9C_MIN_POS) pos = X9C_MIN_POS;
     if (pos > X9C_MAX_POS) pos = X9C_MAX_POS;
 
-    char buf[32];
+    char buf[64];
     snprintf(buf, sizeof(buf), "Setting X9C to position: %d\r\n", pos);
     uart_print(buf);
 
@@ -135,7 +137,7 @@ void x9c_set_position(uint8_t pos) {
     if (delta == 0) return;
 
     gpio_set_level(X9C_UD, delta > 0 ? 1 : 0); // Set direction
-    ets_delay_us(X9C_PULSE_DELAY);
+    esp_rom_delay_us(X9C_PULSE_DELAY);
 
     for (int i = 0; i < abs(delta); i++) {
         x9c_pulse();
@@ -181,7 +183,6 @@ static void servo_init(void)
 
 /* ================= SERVO TASK ================= */
 static void servo_task(void *arg) {
-    int duty = MIN_DUTY;
     bool cmd;
     bool zero = true;
 
@@ -196,7 +197,6 @@ static void servo_task(void *arg) {
                 zero = false;
             } else {
                 uart_print("Servo moving to min\r\n");
-                ESP_LOGI(TAG, "Moving to %d degrees\n", angle);
                 ledc_set_duty(LEDC_HIGH_SPEED_MODE, LEDC_CHANNEL_0, angle_to_duty_cycle(0));
                 ledc_update_duty(LEDC_HIGH_SPEED_MODE, LEDC_CHANNEL_0);
                 vTaskDelay(pdMS_TO_TICKS(1000));
@@ -208,76 +208,76 @@ static void servo_task(void *arg) {
     }
 }
 
-// static void audio_task(void *arg) {
-//     bool cmd;
+static void audio_task(void *arg) {
+    bool cmd;
 
-//     while (1) {
-//         if (xQueueReceive(audio_queue, &cmd, portMAX_DELAY)) {
+    while (1) {
+        if (xQueueReceive(audio_queue, &cmd, portMAX_DELAY)) {
 
-//             FILE *f = fopen(WAV_FILE_PATH, "rb");
-//             if (!f) { uart_print("ERR: no wav file\r\n"); continue; }
+            FILE *f = fopen(WAV_FILE_PATH, "rb");
+            if (!f) { uart_print("ERR: no wav file\r\n"); continue; }
 
-//             wav_header_t hdr;
-//             fread(&hdr, sizeof(hdr), 1, f);
+            wav_header_t hdr;
+            fread(&hdr, sizeof(hdr), 1, f);
 
-//             if (strncmp(hdr.riff, "RIFF", 4) || strncmp(hdr.wave, "WAVE", 4) || hdr.audio_format != 1) {
-//                 uart_print("ERR: bad wav\r\n");
-//                 fclose(f);
-//                 continue;
-//             }
+            if (strncmp(hdr.riff, "RIFF", 4) || strncmp(hdr.wave, "WAVE", 4) || hdr.audio_format != 1) {
+                uart_print("ERR: bad wav\r\n");
+                fclose(f);
+                continue;
+            }
 
-//             i2s_config_t i2s_cfg = {
-//                 .mode                 = I2S_MODE_MASTER | I2S_MODE_TX | I2S_MODE_DAC_BUILT_IN,
-//                 .sample_rate          = hdr.sample_rate,
-//                 .bits_per_sample      = I2S_BITS_PER_SAMPLE_16BIT,
-//                 .channel_format       = I2S_CHANNEL_FMT_ONLY_RIGHT,
-//                 .communication_format = I2S_COMM_FORMAT_I2S_MSB,
-//                 .intr_alloc_flags     = ESP_INTR_FLAG_LEVEL1,
-//                 .dma_buf_count        = 8,
-//                 .dma_buf_len          = 1024,
-//                 .use_apll             = false,
-//                 .tx_desc_auto_clear   = true,
-//             };
-//             i2s_driver_install(I2S_NUM, &i2s_cfg, 0, NULL);
-//             i2s_set_dac_mode(I2S_DAC_CHANNEL_RIGHT_EN);
+            i2s_config_t i2s_cfg = {
+                .mode                 = I2S_MODE_MASTER | I2S_MODE_TX | I2S_MODE_DAC_BUILT_IN,
+                .sample_rate          = hdr.sample_rate,
+                .bits_per_sample      = I2S_BITS_PER_SAMPLE_16BIT,
+                .channel_format       = I2S_CHANNEL_FMT_ONLY_RIGHT,
+                .communication_format = I2S_COMM_FORMAT_STAND_MSB,
+                .intr_alloc_flags     = ESP_INTR_FLAG_LEVEL1,
+                .dma_buf_count        = 8,
+                .dma_buf_len          = 1024,
+                .use_apll             = false,
+                .tx_desc_auto_clear   = true,
+            };
+            i2s_driver_install(I2S_NUM, &i2s_cfg, 0, NULL);
+            i2s_set_dac_mode(I2S_DAC_CHANNEL_RIGHT_EN);
 
-//             i2s_set_clk(I2S_NUM,
-//             hdr.sample_rate,
-//             I2S_BITS_PER_SAMPLE_16BIT,
-//             I2S_CHANNEL_MONO);
+            // i2s_set_clk(I2S_NUM,
+            // hdr.sample_rate,
+            // I2S_BITS_PER_SAMPLE_16BIT,
+            // I2S_CHANNEL_MONO);
 
-//             uart_print("Playing audio\r\n");
+            uart_print("Playing audio\r\n");
 
-//             static uint8_t  buf[READ_BUF_SIZE];
-//             static uint16_t buf16[READ_BUF_SIZE];
-//             size_t written;
+            static uint8_t  buf[READ_BUF_SIZE];
+            static uint16_t buf16[READ_BUF_SIZE];
+            size_t written;
 
-//             while (true) {
-//                 int n = fread(buf, 1, sizeof(buf), f);
-//                 if (n <= 0) break;
+            while (true) {
+                int n = fread(buf, 1, sizeof(buf), f);
+                if (n <= 0) break;
 
-//                 if (hdr.bits_per_sample == 16) {
-//                     int samples = n / 2;
-//                     int16_t *s16 = (int16_t *)buf;
-//                     for (int i = 0; i < samples; i++) {
-//                         // Convert signed 16-bit to unsigned 8-bit for DAC
-//                         buf16[i] = (uint16_t)((s16[i] + 32768) >> 8) << 8;
-//                     }
-//                     i2s_write(I2S_NUM, buf16, samples * 2, &written, portMAX_DELAY);
-//                 } else {
-//                     // 8-bit unsigned, shift up for DAC
-//                     for (int i = 0; i < n; i++) buf16[i] = (uint16_t)buf[i] << 8;
-//                     i2s_write(I2S_NUM, buf16, n * 2, &written, portMAX_DELAY);
-//                 }
-//             }
+                if (hdr.bits_per_sample == 16) {
+                    int samples = n / 2;
+                    int16_t *s16 = (int16_t *)buf;
+                    for (int i = 0; i < samples; i++) {
+                        // Convert signed 16-bit to unsigned 8-bit for DAC
+                        buf16[i] = (uint16_t)((s16[i] + 32768) >> 8) << 8;
+                    }
+                    i2s_write(I2S_NUM, buf16, samples * 2, &written, portMAX_DELAY);
+                } else {
+                    // 8-bit unsigned, shift up for DAC
+                    for (int i = 0; i < n; i++) buf16[i] = (uint16_t)buf[i] << 8;
+                    i2s_write(I2S_NUM, buf16, n * 2, &written, portMAX_DELAY);
+                }
+            }
 
-//             fclose(f);
-//             i2s_zero_dma_buffer(I2S_NUM);
-//             i2s_driver_uninstall(I2S_NUM);
-//             uart_print("Audio done\r\n");
-//         }
-//     }
-// }
+            fclose(f);
+            i2s_zero_dma_buffer(I2S_NUM);
+            i2s_driver_uninstall(I2S_NUM);
+            uart_print("Audio done\r\n");
+        }
+    }
+}
 
 typedef enum {
     UART_STATE_MENU,
@@ -317,10 +317,14 @@ static void uart_rx_task(void *arg) {
                             if (xQueueSend(servo_queue, &cmd, 0)) uart_print("OK: servo\r\n");
                             else uart_print("BUSY\r\n");
                         } else if (strcmp(line, "2") == 0) {
-                            uart_print("Audio task disabled\r\n");
+                            if (xQueueSend(audio_queue, &(bool){true}, 0)) uart_print("OK: audio\r\n");
+                            else uart_print("BUSY\r\n");
                         } else if (strcmp(line, "3") == 0) {
                             uart_print("OK: x9c\r\nEnter X9C position (0-127): \r\n");
                             state = UART_STATE_X9C_INPUT;
+                        } else if (strcmp(line, "4") == 0) {
+                            gpio_set_level(LASER_ENABLE, LASER_ENABLE == 0 ? 1 : 0);
+                            uart_print("Laser ON\r\n");
                         } else {
                             uart_print("?\r\n");
                         }
@@ -369,7 +373,7 @@ static void uart_rx_task(void *arg) {
 void app_main(void) {
 
     servo_queue = xQueueCreate(1, sizeof(bool));
-    // audio_queue = xQueueCreate(1, sizeof(bool));
+    audio_queue = xQueueCreate(1, sizeof(bool));
     x9c_queue   = xQueueCreate(1, sizeof(uint8_t));
     uart_mutex  = xSemaphoreCreateMutex();
     ESP_LOGI(TAG, "queues ok");
@@ -382,13 +386,25 @@ void app_main(void) {
         .stop_bits  = UART_STOP_BITS_1,
         .flow_ctrl  = UART_HW_FLOWCTRL_DISABLE
     };
+
+    gpio_config_t fan_cfg = {
+        .pin_bit_mask = ((1ULL << FAN_ENABLE) | (1ULL << LASER_ENABLE)),
+        .mode = GPIO_MODE_OUTPUT,
+        .pull_up_en = GPIO_PULLUP_DISABLE,
+        .pull_down_en = GPIO_PULLDOWN_DISABLE,
+        .intr_type = GPIO_INTR_DISABLE
+    };
+    gpio_config(&fan_cfg); 
+    gpio_set_level(FAN_ENABLE, 0); // Start with fan on
+    gpio_set_level(LASER_ENABLE, 0); // Laser disabled
+
     uart_driver_install(UART_NUM, UART_BUF * 2, 0, 10, &uart_event_queue, 0);
     uart_param_config(UART_NUM, &cfg);
     uart_set_pin(UART_NUM, UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE);
     ESP_LOGI(TAG, "uart ok");
 
-    // spiffs_init();
-    // ESP_LOGI(TAG, "spiffs ok");
+    spiffs_init();
+    ESP_LOGI(TAG, "spiffs ok");
 
     servo_init();
     ESP_LOGI(TAG, "servo ok");
@@ -398,7 +414,7 @@ void app_main(void) {
 
     xTaskCreate(uart_rx_task, "uart_rx", 4096,  NULL, 10, NULL);
     xTaskCreate(servo_task,   "servo",   4096,  NULL,  9, NULL);
-    // xTaskCreatePinnedToCore(audio_task, "audio", 8192, NULL, 8, NULL, 1);
+    xTaskCreatePinnedToCore(audio_task, "audio", 8192, NULL, 8, NULL, 1);
     xTaskCreate(x9c_task, "x9c_task", 4096, NULL, 9, NULL);
     ESP_LOGI(TAG, "tasks ok");
 }
