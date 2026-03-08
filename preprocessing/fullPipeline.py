@@ -28,8 +28,8 @@ WAVE_MIN = 200
 WAVE_MAX = 3400
 INTERP_STEP = 1
 
-MEDIAN_KERNEL = 15
-POLY_ORDER = 7
+MEDIAN_KERNEL = 5
+POLY_ORDER = 3
 
 
 ############################################################
@@ -151,34 +151,31 @@ def save_processed(df_proc: pd.DataFrame, input_path: Path) -> Path:
 # Library Matching
 ############################################################
 
+def cosine_similarity(a, b):
+    return np.dot(a, b) / (np.linalg.norm(a) * np.linalg.norm(b))
+
+
 def load_library() -> pd.DataFrame:
 
     if not LIB_PATH.exists():
         raise FileNotFoundError(f"Library not found: {LIB_PATH}")
 
-    return pd.read_csv(LIB_PATH, header=None)
+    return pd.read_csv(LIB_PATH)
 
 
-def match_spectrum(unknown: np.ndarray, library_df: pd.DataFrame):
+def match_spectrum(unknown, library_df):
 
     scores = {}
 
-    # Skip first wave column
-    for col in range(1, library_df.shape[1], 2):
+    for material in library_df.columns[1:]:  # skip WAVE column
 
-        material = library_df.iloc[0, col]
+        lib_intensity = library_df[material].astype(float).values
 
-        lib_intensity = library_df.iloc[1:, col].astype(float).values
-
-        if len(lib_intensity) != len(unknown):
-            raise ValueError(f"Length mismatch for {material}")
-
-        r, _ = pearsonr(unknown, lib_intensity)
+        r = cosine_similarity(unknown, lib_intensity)
 
         scores[material] = r
 
     return scores
-
 
 def print_results(scores: dict):
 
@@ -197,7 +194,7 @@ def print_results(scores: dict):
     print("\nTop 3 matches:")
 
     for name, r in sorted_scores[:3]:
-        print(f"{name:25s} r = {r:.4f}")
+        print(f"{str(name):25s} r = {r:.4f}")
 
 
 ############################################################
