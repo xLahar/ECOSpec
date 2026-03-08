@@ -188,24 +188,18 @@ static void servo_task(void *arg) {
     while (1) {
         if (xQueueReceive(servo_queue, &cmd, portMAX_DELAY)) {
             if (zero) {
-                uart_print("Servo moving to max in 10 deg. increments\r\n");
-                for(int angle = 0 ; angle <= 180 ; angle += 10)
-                {
-                    ledc_set_duty(LEDC_HIGH_SPEED_MODE, LEDC_CHANNEL_0, angle_to_duty_cycle(angle));
-                    ledc_update_duty(LEDC_HIGH_SPEED_MODE, LEDC_CHANNEL_0);
-                    vTaskDelay(pdMS_TO_TICKS(1000));
-                }
+                uart_print("Servo moving to max\r\n");
+                ledc_set_duty(LEDC_HIGH_SPEED_MODE, LEDC_CHANNEL_0, angle_to_duty_cycle(180));
+                ledc_update_duty(LEDC_HIGH_SPEED_MODE, LEDC_CHANNEL_0);
+                vTaskDelay(pdMS_TO_TICKS(1000));
                 uart_print("Servo at max\r\n");
                 zero = false;
             } else {
-                uart_print("Servo moving to min in 10 deg. increments\r\n");
-                for(int angle = 170 ; angle >= 10 ; angle -= 10)
-                {
-                    ESP_LOGI(TAG, "Moving to %d degrees\n", angle);
-                    ledc_set_duty(LEDC_HIGH_SPEED_MODE, LEDC_CHANNEL_0, angle_to_duty_cycle(angle));
-                    ledc_update_duty(LEDC_HIGH_SPEED_MODE, LEDC_CHANNEL_0);
-                    vTaskDelay(pdMS_TO_TICKS(1000));
-                }
+                uart_print("Servo moving to min\r\n");
+                ESP_LOGI(TAG, "Moving to %d degrees\n", angle);
+                ledc_set_duty(LEDC_HIGH_SPEED_MODE, LEDC_CHANNEL_0, angle_to_duty_cycle(0));
+                ledc_update_duty(LEDC_HIGH_SPEED_MODE, LEDC_CHANNEL_0);
+                vTaskDelay(pdMS_TO_TICKS(1000));
                 uart_print("Servo at min\r\n");
                 zero = true;
             }
