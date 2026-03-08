@@ -10,19 +10,9 @@ from scipy.stats import pearsonr
 from numpy.polynomial import Polynomial
 from sklearn.preprocessing import MinMaxScaler
 
-
-############################################################
-# Directories
-############################################################
-
 RAW_DIR = Path("spectra/raw")
 PROCESSED_DIR = Path("spectra/processed")
 LIB_PATH = PROCESSED_DIR / "lib.csv"
-
-
-############################################################
-# Parameters
-############################################################
 
 WAVE_MIN = 200
 WAVE_MAX = 3400
@@ -30,11 +20,6 @@ INTERP_STEP = 1
 
 MEDIAN_KERNEL = 5
 POLY_ORDER = 3
-
-
-############################################################
-# Utility Functions
-############################################################
 
 def load_raw_spectrum(path: Path) -> pd.DataFrame:
     """Load and clean raw spectrum."""
@@ -145,11 +130,6 @@ def save_processed(df_proc: pd.DataFrame, input_path: Path) -> Path:
 
     return output
 
-
-############################################################
-# Library Matching
-############################################################
-
 def cosine_similarity(a, b):
     return np.dot(a, b) / (np.linalg.norm(a) * np.linalg.norm(b))
 
@@ -195,11 +175,6 @@ def print_results(scores: dict):
     for name, r in sorted_scores[:3]:
         print(f"{str(name):25s} r = {r:.4f}")
 
-
-############################################################
-# Main
-############################################################
-
 def main():
 
     if len(sys.argv) != 2:
@@ -241,9 +216,6 @@ def main():
     scores = match_spectrum(unknown, library_df)
 
     print_results(scores)
-
-
-############################################################
 
 if __name__ == "__main__":
     main()
