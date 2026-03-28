@@ -150,7 +150,7 @@ def match_spectrum(unknown, library_df):
 
         lib_intensity = library_df[material].astype(float).values
 
-        r = cosine_similarity(unknown, lib_intensity)
+        r, _ = pearsonr(unknown, lib_intensity)
 
         scores[material] = r
 
