@@ -5,6 +5,7 @@
 #include "driver/uart.h"
 #include "driver/ledc.h"
 #include "driver/i2s.h"
+#include "driver/spi_master.h"
 #include "esp_system.h"
 #include "esp_log.h"
 #include "esp_spiffs.h"
@@ -29,19 +30,17 @@ static const char *TAG = "main";
 #define WAV_FILE_PATH "/spiffs/audio.wav"
 #define READ_BUF_SIZE 4096
 
-#define X9C_INC    GPIO_NUM_14
-#define X9C_UD     GPIO_NUM_27
-#define X9C_MAX_POS 127
-#define X9C_MIN_POS 0
-#define X9C_PULSE_DELAY 50
-#define X9C_PINS ((1ULL << X9C_INC) | (1ULL << X9C_UD))
-static int x9c_pos = X9C_MIN_POS;
+#define DIGIPOT_MAX_POS 255
+#define PIN_NUM_MOSI  GPIO_NUM_23
+#define PIN_NUM_CLK   GPIO_NUM_18
+#define PIN_NUM_CS    GPIO_NUM_5
 
 static QueueHandle_t uart_event_queue;
 static QueueHandle_t servo_queue;
 static QueueHandle_t audio_queue;
-static QueueHandle_t x9c_queue;
+static QueueHandle_t digipot_queue;
 static SemaphoreHandle_t uart_mutex;
+static spi_device_handle_t tpl_spi;
 
 uint32_t angle_to_duty_cycle(uint8_t angle)
 {
@@ -87,76 +86,13 @@ static void spiffs_init(void) {
     ESP_ERROR_CHECK(esp_vfs_spiffs_register(&conf));
     ESP_LOGI(TAG, "SPIFFS mounted");
     FILE *f = fopen("/spiffs/audio.wav", "rb");
-if (f) {
-    ESP_LOGI(TAG, "audio.wav found");
-    fclose(f);
-} else {
-    ESP_LOGI(TAG, "audio.wav NOT found");
-}
-}
-
-
-static void x9c_pulse(void) {
-    gpio_set_level(X9C_INC, 1);
-    esp_rom_delay_us(X9C_PULSE_DELAY);
-    gpio_set_level(X9C_INC, 0);
-    esp_rom_delay_us(X9C_PULSE_DELAY);
-
-    x9c_pos = (gpio_get_level(X9C_UD) == 1) ? x9c_pos + 1 : x9c_pos - 1;
-}
-static void x9c_init(void) {
-    gpio_config_t cfg = {
-        .pin_bit_mask = X9C_PINS,
-        .mode = GPIO_MODE_OUTPUT,
-        .pull_up_en = GPIO_PULLUP_DISABLE,
-        .pull_down_en = GPIO_PULLDOWN_DISABLE,
-        .intr_type = GPIO_INTR_DISABLE
-    };
-    gpio_config(&cfg);
-
-    gpio_set_level(X9C_UD, 0); // Set direction to down
-    esp_rom_delay_us(X9C_PULSE_DELAY);
-
-    for (int i = 0; i < X9C_MAX_POS; i++) {
-        x9c_pulse();
+    if (f) {
+        ESP_LOGI(TAG, "audio.wav found");
+        fclose(f);
+    } else {
+        ESP_LOGI(TAG, "audio.wav NOT found");
     }
-    x9c_pos = X9C_MIN_POS;
 }
-
-void x9c_set_position(uint8_t pos) {
-    if (pos < X9C_MIN_POS) pos = X9C_MIN_POS;
-    if (pos > X9C_MAX_POS) pos = X9C_MAX_POS;
-
-    char buf[64];
-    snprintf(buf, sizeof(buf), "Setting X9C to position: %d\r\n", pos);
-    uart_print(buf);
-
-    int delta = pos - x9c_pos;
-    snprintf(buf, sizeof(buf), "Current pos: %d, Delta: %d\r\n", x9c_pos, delta);
-    uart_print(buf);
-    if (delta == 0) return;
-
-    gpio_set_level(X9C_UD, delta > 0 ? 1 : 0); // Set direction
-    esp_rom_delay_us(X9C_PULSE_DELAY);
-
-    for (int i = 0; i < abs(delta); i++) {
-        x9c_pulse();
-    }
-
-    snprintf(buf, sizeof(buf), "X9C position set to %d\r\n", x9c_pos);
-    uart_print(buf);
-}
-
-static void x9c_task(void *arg) {
-    uint8_t pos;
-
-    while (1) {
-        if (xQueueReceive(x9c_queue, &pos, portMAX_DELAY)) {
-            x9c_set_position(pos);
-            uart_print("X9C done\r\n");
-        }
-    }
-};
 
 static void servo_init(void)
 {
@@ -181,6 +117,47 @@ static void servo_init(void)
     ledc_channel_config(&channel);
 }
 
+static void digipot_init(void)
+{
+    spi_bus_config_t buscfg = {
+        .mosi_io_num = PIN_NUM_MOSI,
+        .miso_io_num = -1,
+        .sclk_io_num = PIN_NUM_CLK,
+        .quadwp_io_num = -1,
+        .quadhd_io_num = -1,
+    };
+
+    spi_device_interface_config_t devcfg = {
+        .clock_speed_hz = 1 * 1000 * 1000, // 1 MHz
+        .command_bits = 0,
+        .address_bits = 0,
+        .mode = 0,                         // SPI mode 0
+        .spics_io_num = PIN_NUM_CS,
+        .queue_size = 1,
+    };
+
+    spi_bus_initialize(SPI2_HOST, &buscfg, SPI_DMA_CH_AUTO);
+    spi_bus_add_device(SPI2_HOST, &devcfg, &tpl_spi);
+}
+
+void digipot_set_position(uint8_t pos)
+{
+    if (pos > 255) pos = 255;
+
+    uint8_t data = pos;
+
+    spi_transaction_t t = {
+        .length = 8, // bits
+        .rx_buffer = NULL,
+        .tx_buffer = &data,
+    };
+
+    spi_device_transmit(tpl_spi, &t);
+
+    char buf[64];
+    snprintf(buf, sizeof(buf), "digipot set to %d\r\n", pos);
+    uart_print(buf);
+}
 /* ================= SERVO TASK ================= */
 static void servo_task(void *arg) {
     bool cmd;
@@ -279,9 +256,20 @@ static void audio_task(void *arg) {
     }
 }
 
+static void digipot_task(void *arg) {
+    uint8_t pos;
+
+    while (1) {
+        if (xQueueReceive(digipot_queue, &pos, portMAX_DELAY)) {
+            digipot_set_position(pos);
+            uart_print("digipot done\r\n");
+        }
+    }
+}
+
 typedef enum {
     UART_STATE_MENU,
-    UART_STATE_X9C_INPUT
+    UART_STATE_digipot_INPUT
 } uart_state_t;
 
 static void uart_rx_task(void *arg) {
@@ -320,8 +308,8 @@ static void uart_rx_task(void *arg) {
                             if (xQueueSend(audio_queue, &(bool){true}, 0)) uart_print("OK: audio\r\n");
                             else uart_print("BUSY\r\n");
                         } else if (strcmp(line, "3") == 0) {
-                            uart_print("OK: x9c\r\nEnter X9C position (0-127): \r\n");
-                            state = UART_STATE_X9C_INPUT;
+                            uart_print("OK: digipot\r\nEnter digipot position (0-255): \r\n");
+                            state = UART_STATE_digipot_INPUT;
                         } else if (strcmp(line, "4") == 0) {
                             gpio_set_level(LASER_ENABLE, LASER_ENABLE == 0 ? 1 : 0);
                             uart_print("Laser ON\r\n");
@@ -329,8 +317,8 @@ static void uart_rx_task(void *arg) {
                             uart_print("?\r\n");
                         }
                     }
-                    else if (state == UART_STATE_X9C_INPUT) {
-                        // Numeric input for X9C
+                    else if (state == UART_STATE_digipot_INPUT) {
+                        // Numeric input for digipot    
                         char clean_line[16];
                         int j = 0;
                         for (int k = 0; k < (int)strlen(line) && j < (int)sizeof(clean_line)-1; k++) {
@@ -339,17 +327,17 @@ static void uart_rx_task(void *arg) {
                         clean_line[j] = '\0';
 
                         if (clean_line[0] == '\0') {
-                            uart_print("Invalid input, must be 0-127\r\n");
+                            uart_print("Invalid input, must be 0-255\r\n");
                         } else {
                             uint8_t pos = (uint8_t)atoi(clean_line);
-                            if (pos > X9C_MAX_POS) pos = X9C_MAX_POS;
+                            if (pos > DIGIPOT_MAX_POS) pos = DIGIPOT_MAX_POS;
 
-                            if (xQueueSend(x9c_queue, &pos, 0)) {
+                            if (xQueueSend(digipot_queue, &pos, 0)) {
                                 char msg[64];
-                                snprintf(msg, sizeof(msg), "Queued X9C pos %d\r\n", pos);
+                                snprintf(msg, sizeof(msg), "Queued digipot pos %d\r\n", pos);
                                 uart_print(msg);
                             } else {
-                                uart_print("X9C BUSY\r\n");
+                                uart_print("digipot BUSY\r\n");
                             }
                         }
 
@@ -374,7 +362,7 @@ void app_main(void) {
 
     servo_queue = xQueueCreate(1, sizeof(bool));
     audio_queue = xQueueCreate(1, sizeof(bool));
-    x9c_queue   = xQueueCreate(1, sizeof(uint8_t));
+    digipot_queue   = xQueueCreate(1, sizeof(uint8_t));
     uart_mutex  = xSemaphoreCreateMutex();
     ESP_LOGI(TAG, "queues ok");
 
@@ -409,12 +397,13 @@ void app_main(void) {
     servo_init();
     ESP_LOGI(TAG, "servo ok");
 
-    x9c_init();
-    ESP_LOGI(TAG, "x9c ok");
+    digipot_init();
+    digipot_set_position(255);
+    ESP_LOGI(TAG, "digipot ok");
 
     xTaskCreate(uart_rx_task, "uart_rx", 4096,  NULL, 10, NULL);
     xTaskCreate(servo_task,   "servo",   4096,  NULL,  9, NULL);
+    xTaskCreate(digipot_task, "digipot", 4096,  NULL,  9, NULL);
     xTaskCreatePinnedToCore(audio_task, "audio", 8192, NULL, 8, NULL, 1);
-    xTaskCreate(x9c_task, "x9c_task", 4096, NULL, 9, NULL);
     ESP_LOGI(TAG, "tasks ok");
 }
