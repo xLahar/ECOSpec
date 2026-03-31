@@ -653,7 +653,7 @@ log('Checking hardware...', 'info');
 //  Canvas Setup 
 const canvas = document.getElementById('specCanvas');
 const ctx = canvas.getContext('2d');
-let animId, scanInterval, scanning = false, currentSpec = null;
+let animId, scanInterval, scanning = false, currentSpec = null, lastScanResult = null;
 
 function resizeCanvas() {
   const wrap = document.getElementById('specWrap');
@@ -824,8 +824,8 @@ function startScan() {
 
 function finishScan(result) {
   scanning = false;
+  lastScanResult = result;
   currentSpec = result.spectrum;
-  draw(currentSpec);
 
   document.getElementById('start-btn').disabled = false;
   document.getElementById('start-btn').textContent = '▶ SCAN';
@@ -919,30 +919,36 @@ function closeModal() {
 async function confirmExport() {
   if (!currentSpec) return;
 
-  const integ    = document.getElementById('integ-val').textContent;
+  const integ     = document.getElementById('integ-val').textContent;
   const timestamp = new Date().toISOString();
-  let filename   = document.getElementById('modal-filename').value.trim() || 'ecospec_scan.csv';
+  let filename    = document.getElementById('modal-filename').value.trim() || 'ecospec_scan.csv';
   if (!filename.endsWith('.csv')) filename += '.csv';
 
-  // Selected save directory from the location buttons
-  const selBtn = document.querySelector('.modal-loc-btn.selected');
-  const saveDir = selBtn ? selBtn.dataset.path : '/home/pi';
+  const selBtn  = document.querySelector('.modal-loc-btn.selected');
+  const saveDir = selBtn ? selBtn.dataset.path : '/home/ecospec';
   const fullPath = saveDir.replace(/\/$/, '') + '/' + filename;
+
+  // Use real match result if available, otherwise fallback
+  const matchName = lastScanResult ? lastScanResult.match : 'Unknown';
+  const matchPct  = lastScanResult ? Math.round(lastScanResult.r * 100) + '%' : 'N/A';
 
   let csv = '# ECOSpec Export\n';
   csv += `# Timestamp: ${timestamp}\n`;
   csv += `# Integration Time: ${integ}\n`;
-  csv += '# Result: Polyethylene (PE) — 93.6%\n#\n';
+  csv += `# Result: ${matchName} — ${matchPct}\n`;
+  csv += `# Source File: ${lastScanResult ? lastScanResult.file : 'unknown'}\n#\n`;
   csv += 'Index,Raman Shift (cm-1),Intensity (normalized)\n';
-  const n = norm(currentSpec);
-  n.forEach((v, i) => {
-    const shift = Math.round(500 + (i / (n.length - 1)) * 1400);
+
+  // Use real wavenumber shifts if available, otherwise space evenly 200-3400
+  currentSpec.forEach((v, i) => {
+    const shift = lastScanResult && lastScanResult.shifts
+      ? lastScanResult.shifts[i]
+      : Math.round(200 + (i / (currentSpec.length - 1)) * 3200);
     csv += `${i},${shift},${v.toFixed(5)}\n`;
   });
 
   closeModal();
 
-  // Write directly via Python backend — no browser download tricks
   try {
     const result = await window.pywebview.api.save_csv(csv, fullPath);
     if (result.ok) {
