@@ -20,9 +20,9 @@ static const char *TAG = "main";
 #define LASER_ENABLE GPIO_NUM_26
 #define LASER_SHUTOFF GPIO_NUM_19
 
-#define FAN_ENABLE GPIO_NUM_34
+#define FAN_ENABLE GPIO_NUM_33
 
-#define SERVO_PIN   GPIO_NUM_33
+#define SERVO_PIN   GPIO_NUM_32
 #define MIN_DUTY    410
 #define MAX_DUTY    2048
 
