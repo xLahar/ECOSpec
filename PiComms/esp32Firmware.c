@@ -311,11 +311,24 @@ static void uart_rx_task(void *arg) {
                             uart_print("OK: digipot\r\nEnter digipot position (0-255): \r\n");
                             state = UART_STATE_digipot_INPUT;
                         } else if (strcmp(line, "4") == 0) {
-                            gpio_set_level(LASER_ENABLE, LASER_ENABLE == 0 ? 1 : 0);
-                            uart_print("Laser ON\r\n");
-                        } else {
-                            uart_print("?\r\n");
-                        }
+                            static bool ldo_on = false;
+                            ldo_on = !ldo_on;
+                            gpio_set_level(LASER_LDO_ENABLE, ldo_on ? 1 : 0);
+                            if (ldo_on) uart_print("Laser Power Set Ready\r\n");
+                            else uart_print("Laser Power Disabled\r\n");
+                        } else if (strcmp(line, "5") == 0) {
+                            static bool laser_on = false;
+                            laser_on = !laser_on;
+                            gpio_set_level(LASER_ENABLE, laser_on ? 1 : 0);
+                            if (laser_on) uart_print("Laser Emission Enabled\r\n");
+                            else uart_print("Laser Emission Disabled\r\n");
+                       } else if (strcmp(line, "9") == 0) {
+                            static bool fan_set = true;
+                            fan_set = !fan_set;
+                            gpio_set_level(FAN_ENABLE, fan_set ? 0 : 1);
+                            if (fan_set) uart_print("Fans Disabled\r\n");
+                            else uart_print("Fans Enabled\r\n");
+                        }                         
                     }
                     else if (state == UART_STATE_digipot_INPUT) {
                         // Numeric input for digipot    
@@ -384,6 +397,7 @@ void app_main(void) {
     };
     gpio_config(&fan_cfg); 
     gpio_set_level(FAN_ENABLE, 0); // Start with fan on
+    gpio_set_level(LASER_LDO_ENABLE, 0); //Laser modulation disabled
     gpio_set_level(LASER_ENABLE, 0); // Laser disabled
 
     uart_driver_install(UART_NUM, UART_BUF * 2, 0, 10, &uart_event_queue, 0);
