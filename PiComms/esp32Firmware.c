@@ -17,8 +17,8 @@ static const char *TAG = "main";
 #define UART_NUM UART_NUM_0
 #define UART_BUF 256
 
-#define LASER_ENABLE GPIO_NUM_26
-#define LASER_SHUTOFF GPIO_NUM_19
+#define LASER_LDO_ENABLE GPIO_NUM_26
+#define LASER_ENABLE GPIO_NUM_27
 
 #define FAN_ENABLE GPIO_NUM_33
 
@@ -128,7 +128,7 @@ static void digipot_init(void)
     };
 
     spi_device_interface_config_t devcfg = {
-        .clock_speed_hz = 1 * 1000 * 1000, // 1 MHz
+        .clock_speed_hz = 100 * 1000, // 100 kHz
         .command_bits = 0,
         .address_bits = 0,
         .mode = 0,                         // SPI mode 0
@@ -376,7 +376,7 @@ void app_main(void) {
     };
 
     gpio_config_t fan_cfg = {
-        .pin_bit_mask = ((1ULL << FAN_ENABLE) | (1ULL << LASER_ENABLE)),
+        .pin_bit_mask = ((1ULL << FAN_ENABLE) | (1ULL << LASER_ENABLE) | (1ULL << LASER_LDO_ENABLE)),
         .mode = GPIO_MODE_OUTPUT,
         .pull_up_en = GPIO_PULLUP_DISABLE,
         .pull_down_en = GPIO_PULLDOWN_DISABLE,
